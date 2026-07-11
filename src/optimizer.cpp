@@ -269,7 +269,10 @@ IdentificationPipeline::Result IdentificationPipeline::run(
 
   // Aggregate results
   Result result;
-  if (lm_res.final_cost < best_cma_cost && lm_res.converged) {
+  // If CMA-ES found nothing (default 1e20), accept any finite LM result.
+  // Otherwise only accept LM if it improved and converged.
+  bool cmaes_failed = (best_cma_cost >= 1e19);
+  if (lm_res.final_cost < best_cma_cost && (cmaes_failed || lm_res.converged)) {
     std::cout << "  LM improved cost: " << lm_res.final_cost
               << " (iters=" << lm_res.n_iters << ")\n";
     result.params  = lm_res.final_params;

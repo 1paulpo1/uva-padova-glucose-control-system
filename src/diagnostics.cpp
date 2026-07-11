@@ -73,7 +73,7 @@ DBSCANResult cluster_restarts(const std::vector<RestartRecord>& restarts,
   // Core points: have ≥ minPts neighbours
   std::vector<bool> is_core(N, false);
   for (int i = 0; i < N; ++i) {
-    if (static_cast<int>(neighbors[i].size()) >= minPts)
+    if (static_cast<int>(neighbors[i].size()) >= std::max(0, minPts - 1))
       is_core[i] = true;
   }
 

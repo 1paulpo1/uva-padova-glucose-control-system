@@ -77,12 +77,13 @@ def _aggregate_basal(df):
         return []
 
     segments = []
-    prev_rate = df["basal"].iloc[0]
     seg_start = df["date"].iloc[0]
+    prev_rate = df["basal"].iloc[0]
+    if prev_rate is None or (isinstance(prev_rate, float) and prev_rate != prev_rate):
+        prev_rate = 0.0
 
     for idx, row in df.iterrows():
         rate = row["basal"]
-        # Treat NaN basal as 0
         if rate is None or (isinstance(rate, float) and rate != rate):
             rate = 0.0
         if abs(rate - prev_rate) > 1e-9:

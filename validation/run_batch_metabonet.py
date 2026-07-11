@@ -22,6 +22,7 @@ Examples:
 
 import argparse
 import csv
+import json
 import os
 import subprocess
 import sys
@@ -38,6 +39,54 @@ DEFAULT_PARQUET = os.environ.get(
 
 # Scanned columns for quick audit
 AUDIT_COLS = ["id", "weight", "source_file", "carbs", "bolus", "CGM"]
+SCAN_CACHE_FILE = "patient_scan_cache.json"
+
+
+def _parquet_signature(path: str) -> dict | None:
+    try:
+        st = os.stat(path)
+        return {"size": st.st_size, "mtime": st.st_mtime_ns}
+    except OSError:
+        return None
+
+
+def _load_scan_cache(cache_dir: str, sig: dict | None,
+                     study: str | None) -> dict | None:
+    cache_path = os.path.join(cache_dir, SCAN_CACHE_FILE)
+    if not os.path.exists(cache_path) or sig is None:
+        return None
+    try:
+        with open(cache_path) as f:
+            data = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    stored = data.get("parquet_signature")
+    if stored is None or stored.get("size") != sig["size"] or stored.get("mtime") != sig["mtime"]:
+        return None
+    if data.get("study") != study:
+        return None
+    patients = data.get("patients")
+    if patients is None:
+        return None
+    result = {pid_str: p for pid_str, p in patients.items()}
+    print(f"  Loaded {len(result)} patients from cache ({cache_path})")
+    return result
+
+
+def _save_scan_cache(cache_dir: str, patients: dict,
+                     sig: dict | None, study: str | None):
+    if sig is None:
+        return
+    cache_path = os.path.join(cache_dir, SCAN_CACHE_FILE)
+    data = {"parquet_signature": sig, "study": study, "patients": patients}
+    os.makedirs(cache_dir, exist_ok=True)
+    tmp = cache_path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(data, f, indent=2, default=str)
+        os.replace(tmp, cache_path)
+    except OSError:
+        pass
 
 
 def scan_patients(parquet_path: str, study: str | None, limit: int | None = None):
@@ -311,22 +360,31 @@ def main():
                     help="Output directory (default: validation/output)")
     ap.add_argument("--parse-script", type=str, default=None,
                     help="Path to parse_metabonet.py (default: auto)")
+    ap.add_argument("--no-cache", action="store_true",
+                    help="Force re-scan parquet, ignore cache")
     args = ap.parse_args()
 
     if not os.path.exists(args.parquet):
         print(f"Error: parquet not found at {args.parquet}")
         sys.exit(1)
 
-    # ---- Scan patients ----
+    # ---- Scan patients (with cache) ----
     print("Scanning parquet for patients...")
-    scan_limit = None if args.report_only else args.max_scan * 10
-    all_patients = scan_patients(args.parquet, args.study, scan_limit)
+    output_dir = (args.output_dir
+                  or os.path.join(os.path.dirname(os.path.abspath(__file__)), "output"))
+    sig = None if args.no_cache else _parquet_signature(args.parquet)
+    all_patients = _load_scan_cache(output_dir, sig, args.study) if not args.no_cache else None
 
-    if not all_patients:
-        print("No patients with weight found!")
-        sys.exit(1)
-
-    print(f"  Found {len(all_patients)} patients with weight")
+    if all_patients is None:
+        scan_limit = None if args.report_only else args.max_scan * 10
+        all_patients = scan_patients(args.parquet, args.study, scan_limit)
+        if not all_patients:
+            print("No patients with weight found!")
+            sys.exit(1)
+        _save_scan_cache(output_dir, all_patients, sig, args.study)
+        print(f"  Found {len(all_patients)} patients with weight")
+    else:
+        print(f"  Cache hit: {len(all_patients)} patients with weight")
 
     if args.report_only:
         report_path = os.path.join(

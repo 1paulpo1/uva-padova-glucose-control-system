@@ -67,7 +67,7 @@ struct ParamDescriptor {
 //   true_value = base_value · exp(θᵢ)
 // ---------------------------------------------------------------------------
 struct ObservationCost : ceres::CostFunction {
-  static constexpr int kMaxJetDim = 27;
+  static constexpr int kMaxJetDim = 30;
   using JetT = ceres::Jet<double, kMaxJetDim>;
 
   const IdentificationData& data_;

@@ -36,3 +36,10 @@ target_include_directories(test_real_data
   PRIVATE
     ${CMAKE_SOURCE_DIR}/include
 )
+
+target_compile_definitions(test_real_data
+  PRIVATE
+    UVA_PADOVA_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config"
+    VALIDATION_OUTPUT_DIR="${VALIDATION_OUTPUT_DIR}"
+    VALIDATION_FIGURES_DIR="${VALIDATION_FIGURES_DIR}"
+)

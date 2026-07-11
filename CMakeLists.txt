@@ -8,11 +8,18 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 find_package(Eigen3 REQUIRED)
 
 # Use shared gflags to avoid duplicate static registrations
-set(gflags_DIR /opt/homebrew/Cellar/gflags/2.3.0/lib/cmake/gflags CACHE PATH "Path to gflags CMake config")
+if(EXISTS /opt/homebrew/Cellar/gflags/2.3.0/lib/cmake/gflags)
+  set(gflags_DIR /opt/homebrew/Cellar/gflags/2.3.0/lib/cmake/gflags CACHE PATH "Path to gflags CMake config")
+endif()
 find_package(gflags REQUIRED)
-# Create alias so Ceres' interface dependency uses shared library
+# Create alias so Ceres' interface dependency finds `gflags` target
 if(NOT TARGET gflags)
-  add_library(gflags ALIAS gflags_shared)
+  foreach(_candidate gflags_shared gflags_static gflags::gflags_shared gflags::gflags_static)
+    if(TARGET ${_candidate})
+      add_library(gflags ALIAS ${_candidate})
+      break()
+    endif()
+  endforeach()
 endif()
 find_package(Ceres REQUIRED)
 
@@ -20,14 +27,17 @@ find_package(NLopt REQUIRED)
 find_package(libcmaes REQUIRED)
 
 # nlohmann/json (header-only, zero-dependency)
-include(FetchContent)
-FetchContent_Declare(
-  nlohmann_json
-  GIT_REPOSITORY https://github.com/nlohmann/json.git
-  GIT_TAG v3.11.3
-)
-set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
-FetchContent_MakeAvailable(nlohmann_json)
+find_package(nlohmann_json QUIET)
+if(NOT nlohmann_json_FOUND)
+  include(FetchContent)
+  FetchContent_Declare(
+    nlohmann_json
+    GIT_REPOSITORY https://github.com/nlohmann/json.git
+    GIT_TAG v3.11.3
+  )
+  set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+  FetchContent_MakeAvailable(nlohmann_json)
+endif()
 
 find_package(matplotplusplus QUIET)
 if(matplotplusplus_FOUND)
@@ -49,8 +59,14 @@ target_include_directories(uva_padova_core
   PUBLIC
     include
     ${EIGEN3_INCLUDE_DIR}
-    /opt/homebrew/include/unscented
 )
+
+# unscented (UKF) library — optional, see https://github.com/kam3k/unscented
+if(EXISTS /opt/homebrew/include/unscented)
+  target_include_directories(uva_padova_core PUBLIC /opt/homebrew/include/unscented)
+elseif(EXISTS /mingw64/include/unscented)
+  target_include_directories(uva_padova_core PUBLIC /mingw64/include/unscented)
+endif()
 
 target_link_libraries(uva_padova_core
   PUBLIC

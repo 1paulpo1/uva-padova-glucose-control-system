@@ -1,0 +1,86 @@
+#pragma once
+
+#include <vector>
+#include <Eigen/Core>
+#include "uva_padova/cost_function.hpp"
+
+namespace uva_padova {
+
+// ---------------------------------------------------------------------------
+// CMA-ES optimizer wrapper (libcmaes)
+// ---------------------------------------------------------------------------
+struct CMAESOptimizer {
+  struct Result {
+    std::vector<double> best_params;
+    double best_cost{1e20};
+    int n_evals{0};
+  };
+
+  static Result run(const ObservationCost& cost,
+                    const std::vector<double>& initial_sigma,
+                    int max_evals = 1000,
+                    int seed = -1);
+};
+
+// ---------------------------------------------------------------------------
+// Ceres Levenberg-Marquardt optimizer
+// ---------------------------------------------------------------------------
+struct LMOptimizer {
+  struct Result {
+    std::vector<double> final_params;
+    double final_cost{1e20};
+    int n_iters{0};
+    bool converged{false};
+    Eigen::MatrixXd cov;           // naive posterior covariance (J^T J)^{-1}
+    Eigen::MatrixXd cov_sandwich;  // robust sandwich covariance H^{-1} V H^{-1}
+  };
+
+  struct CovarianceResult {
+    Eigen::MatrixXd cov;
+    Eigen::MatrixXd cov_sandwich;
+  };
+
+  static Result run(const std::vector<double>& initial_params,
+                    ObservationCost& obs_cost,
+                    PriorCost& prior_cost,
+                    int max_iters = 100);
+
+  // Evaluate covariance + sandwich covariance at an arbitrary theta
+  // (not necessarily the LM convergence point). Used by IdentificationPipeline
+  // to always report cov consistent with the chosen params.
+  static CovarianceResult compute_covariance_at(
+      const std::vector<double>& theta,
+      ObservationCost& obs_cost,
+      PriorCost& prior_cost);
+};
+
+// ---------------------------------------------------------------------------
+// Full pipeline: CMA-ES (×N restarts) → LM → top result
+// ---------------------------------------------------------------------------
+struct RestartRecord {
+  std::vector<double> params;
+  double cost{1e20};
+};
+
+struct IdentificationPipeline {
+  struct Result {
+    std::vector<double> params;
+    double cost{1e20};
+    int total_evals{0};
+    bool success{false};
+    Eigen::MatrixXd cov;           // posterior covariance from LM refinement
+    Eigen::MatrixXd cov_sandwich;  // robust sandwich covariance
+    std::vector<RestartRecord> all_restarts;  // best point from each CMA-ES restart
+
+    Params to_params(const Params& base,
+                     const std::vector<ParamDescriptor>& desc) const;
+  };
+
+  static Result run(const IdentificationData& data,
+                    const Params& base_params,
+                    const std::vector<ParamDescriptor>& param_desc,
+                    int n_cmaes_restarts = 3,
+                    int cmaes_evals = 1000);
+};
+
+} // namespace uva_padova

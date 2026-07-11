@@ -1,0 +1,25 @@
+# Build
+build/
+cmake-build-*/
+
+# IDE
+.idea/
+*.xcworkspace
+*.xcodeproj
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Validation output (generated)
+validation/output/
+validation/figures/
+
+# Python
+__pycache__/
+*.pyc
+.venv/

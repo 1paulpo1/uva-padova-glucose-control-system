@@ -1,0 +1,77 @@
+cmake_minimum_required(VERSION 3.20)
+project(uva_padova LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 20)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+
+find_package(Eigen3 REQUIRED)
+
+# Use shared gflags to avoid duplicate static registrations
+set(gflags_DIR /opt/homebrew/Cellar/gflags/2.3.0/lib/cmake/gflags CACHE PATH "Path to gflags CMake config")
+find_package(gflags REQUIRED)
+# Create alias so Ceres' interface dependency uses shared library
+if(NOT TARGET gflags)
+  add_library(gflags ALIAS gflags_shared)
+endif()
+find_package(Ceres REQUIRED)
+
+find_package(NLopt REQUIRED)
+find_package(libcmaes REQUIRED)
+
+find_package(matplotplusplus QUIET)
+if(matplotplusplus_FOUND)
+  set(HAS_MATPLOTPLUS ON)
+  message(STATUS "matplotplusplus found")
+else()
+  set(HAS_MATPLOTPLUS OFF)
+  message(STATUS "matplotplusplus NOT found - validation plots disabled")
+endif()
+
+# Core model library (no heavy deps)
+add_library(uva_padova_core
+  src/types.cpp
+  src/odesystem.cpp
+  src/integrals.cpp
+)
+
+target_include_directories(uva_padova_core
+  PUBLIC
+    include
+    ${EIGEN3_INCLUDE_DIR}
+    /opt/homebrew/include/unscented
+)
+
+target_link_libraries(uva_padova_core
+  PUBLIC
+    Eigen3::Eigen
+)
+
+# Identification library (Ceres, NLopt, libcmaes)
+add_library(uva_padova_id
+  src/optimizer.cpp
+  src/diagnostics.cpp
+)
+
+target_include_directories(uva_padova_id
+  PUBLIC
+    include
+    ${EIGEN3_INCLUDE_DIR}
+)
+
+target_link_libraries(uva_padova_id
+  PUBLIC
+    uva_padova_core
+    ${CERES_LIBRARIES}
+    NLopt::nlopt
+    libcmaes::cmaes
+)
+
+target_compile_options(uva_padova_core PRIVATE -Wall -Wextra -Wpedantic)
+target_compile_options(uva_padova_id PRIVATE -Wall -Wextra -Wpedantic)
+
+# Tests
+add_subdirectory(tests)
+
+# Validation (CSV output, plotted via Python)
+add_subdirectory(validation)

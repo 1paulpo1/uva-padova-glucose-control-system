@@ -2,6 +2,7 @@
 #include <libcmaes/cmaes.h>
 
 #include "uva_padova/optimizer.hpp"
+#include "uva_padova/config_loader.hpp"
 
 #include <iostream>
 #include <random>
@@ -336,6 +337,36 @@ Params IdentificationPipeline::Result::to_params(
     if (desc[i].name == "BW")   p.BW   *= mult;
   }
   return p;
+}
+
+// ===========================================================================
+// Pipeline convenience: load from JSON config
+// ===========================================================================
+IdentificationPipeline::Result IdentificationPipeline::run_from_config(
+    const IdentificationData& data,
+    const Params& base_params,
+    const std::string& json_path,
+    int n_cmaes_restarts,
+    int cmaes_evals,
+    std::vector<ParamDescriptor>* full_desc)
+{
+  auto all = load_param_descriptors(json_path);
+  if (all.empty()) {
+    std::cerr << "pipeline: failed to load config from " << json_path << "\n";
+    Result err;
+    err.success = false;
+    return err;
+  }
+
+  if (full_desc)
+    *full_desc = all;
+
+  auto active = active_descriptors(all);
+  std::cout << "  Config: " << all.size() << " params total, "
+            << active.size() << " active ("
+            << (all.size() - active.size()) << " fixed)\n";
+
+  return run(data, base_params, active, n_cmaes_restarts, cmaes_evals);
 }
 
 } // namespace uva_padova

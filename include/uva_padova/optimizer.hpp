@@ -81,6 +81,17 @@ struct IdentificationPipeline {
                     const std::vector<ParamDescriptor>& param_desc,
                     int n_cmaes_restarts = 3,
                     int cmaes_evals = 1000);
+
+  // Convenience overload: load param descriptors from JSON config,
+  // filter to only non-fixed params, and run the pipeline.
+  // Returns the result AND the full param descriptor list (with fixed flags)
+  // via the output parameter `full_desc`.
+  static Result run_from_config(const IdentificationData& data,
+                                const Params& base_params,
+                                const std::string& json_path,
+                                int n_cmaes_restarts = 3,
+                                int cmaes_evals = 1000,
+                                std::vector<ParamDescriptor>* full_desc = nullptr);
 };
 
 } // namespace uva_padova

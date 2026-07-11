@@ -83,6 +83,11 @@ target_sources(uva_padova_id
     src/config_loader.cpp
 )
 
+target_compile_definitions(uva_padova_id
+  PRIVATE
+    UVA_PADOVA_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config"
+)
+
 target_compile_options(uva_padova_core PRIVATE -Wall -Wextra -Wpedantic)
 target_compile_options(uva_padova_id PRIVATE -Wall -Wextra -Wpedantic)
 

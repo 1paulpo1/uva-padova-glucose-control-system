@@ -52,6 +52,7 @@ struct ParamDescriptor {
   double prior_mean{1.0};
   double prior_std{2.0};
   double initial_val{1.0};
+  bool fixed{false};
 };
 
 // ---------------------------------------------------------------------------
@@ -66,7 +67,7 @@ struct ParamDescriptor {
 //   true_value = base_value · exp(θᵢ)
 // ---------------------------------------------------------------------------
 struct ObservationCost : ceres::CostFunction {
-  static constexpr int kMaxJetDim = 20;
+  static constexpr int kMaxJetDim = 27;
   using JetT = ceres::Jet<double, kMaxJetDim>;
 
   const IdentificationData& data_;
@@ -347,6 +348,21 @@ struct ObservationCost : ceres::CostFunction {
       if (desc.name == "VI")   p.VI   *= multiplier;
       if (desc.name == "Gb")   p.Gb   *= multiplier;
       if (desc.name == "Ib")   p.Ib   *= multiplier;
+      if (desc.name == "k1")   p.k1   *= multiplier;
+      if (desc.name == "k2")   p.k2   *= multiplier;
+      if (desc.name == "m1")   p.m1   *= multiplier;
+      if (desc.name == "m2")   p.m2   *= multiplier;
+      if (desc.name == "m4")   p.m4   *= multiplier;
+      if (desc.name == "ki")   p.ki   *= multiplier;
+      if (desc.name == "f")    p.f    *= multiplier;
+      if (desc.name == "b")    p.b    *= multiplier;
+      if (desc.name == "d")    p.d    *= multiplier;
+      if (desc.name == "ke1")  p.ke1  *= multiplier;
+      if (desc.name == "ke2")  p.ke2  *= multiplier;
+      if (desc.name == "Ts")   p.Ts   *= multiplier;
+      if (desc.name == "r1")   p.r1   *= multiplier;
+      if (desc.name == "Gth")  p.Gth  *= multiplier;
+      if (desc.name == "BW")   p.BW   *= multiplier;
     }
   }
 

@@ -319,6 +319,21 @@ Params IdentificationPipeline::Result::to_params(
     if (desc[i].name == "VI")   p.VI   *= mult;
     if (desc[i].name == "Gb")   p.Gb   *= mult;
     if (desc[i].name == "Ib")   p.Ib   *= mult;
+    if (desc[i].name == "k1")   p.k1   *= mult;
+    if (desc[i].name == "k2")   p.k2   *= mult;
+    if (desc[i].name == "m1")   p.m1   *= mult;
+    if (desc[i].name == "m2")   p.m2   *= mult;
+    if (desc[i].name == "m4")   p.m4   *= mult;
+    if (desc[i].name == "ki")   p.ki   *= mult;
+    if (desc[i].name == "f")    p.f    *= mult;
+    if (desc[i].name == "b")    p.b    *= mult;
+    if (desc[i].name == "d")    p.d    *= mult;
+    if (desc[i].name == "ke1")  p.ke1  *= mult;
+    if (desc[i].name == "ke2")  p.ke2  *= mult;
+    if (desc[i].name == "Ts")   p.Ts   *= mult;
+    if (desc[i].name == "r1")   p.r1   *= mult;
+    if (desc[i].name == "Gth")  p.Gth  *= mult;
+    if (desc[i].name == "BW")   p.BW   *= mult;
   }
   return p;
 }

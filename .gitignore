@@ -16,8 +16,6 @@ cmake-build-*/
 Thumbs.db
 
 # Validation output (generated)
-validation/output/
-validation/figures/
 
 # Python
 __pycache__/

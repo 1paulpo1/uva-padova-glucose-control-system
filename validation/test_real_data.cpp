@@ -3,7 +3,9 @@
 //
 // Usage:
 //     ./test_real_data <cgm_csv> <basal_csv> [n_restarts] [cmaes_evals] [mode]
-//     mode: '3' (kp2+Vm0+p2U, default) or '6' (+ka1+ka2+kd)
+//     mode: 'config' (default, JSON config — 21 active params, greedy-5 fixed)
+//           '3'     (kp2+Vm0+p2U, legacy), '6' (+ka1+ka2+kd, legacy),
+//           '9'     (+kabs+Gb+VG, legacy)
 //
 // Defaults: 3 restarts, 500 evals each.
 // =============================================================================
@@ -24,6 +26,7 @@
 #include "uva_padova/optimizer.hpp"
 #include "uva_padova/diagnostics.hpp"
 #include "uva_padova/constants.hpp"
+#include "uva_padova/config_loader.hpp"
 
 #include "csv_reader.hpp"
 
@@ -34,7 +37,8 @@ int main(int argc, char* argv[]) {
 
   if (argc < 3) {
     std::cerr << "Usage: " << argv[0] << " <cgm_csv> <basal_csv> [n_restarts] [cmaes_evals] [mode]\n";
-    std::cerr << "  mode: '3' (default, kp2+Vm0+p2U) or '6' (+ka1+ka2+kd)\n";
+    std::cerr << "  mode: 'config' (default, JSON — 21 active, greedy-5 fixed),\n";
+    std::cerr << "        '3' (kp2+Vm0+p2U), '6' (+ka1+ka2+kd), '9' (+kabs+Gb+VG)\n";
     return 1;
   }
 
@@ -42,11 +46,13 @@ int main(int argc, char* argv[]) {
   std::string basal_csv = argv[2];
   int n_restarts = (argc > 3) ? std::atoi(argv[3]) : 3;
   int cmaes_evals = (argc > 4) ? std::atoi(argv[4]) : 500;
-  std::string mode = (argc > 5) ? argv[5] : "3";
+  std::string mode = (argc > 5) ? argv[5] : "config";
 
   // ---- Choose params to identify ----
   std::vector<ParamDescriptor> desc;
-  if (mode == "6") {
+  bool use_config = (mode == "config");
+  if (!use_config) {
+    if (mode == "6") {
     desc = {
       { "kp2",  0.0, 1.0, 0.0 },
       { "Vm0",  0.0, 1.0, 0.0 },
@@ -67,22 +73,26 @@ int main(int argc, char* argv[]) {
       { "Gb",   0.0, 0.2, 0.0 },  // tight prior — Gb ≈ CGM median
       { "VG",   0.0, 1.0, 0.0 },
     };
-  } else {
-    desc = {
-      { "kp2",  0.0, 1.0, 0.0 },
-      { "Vm0",  0.0, 1.0, 0.0 },
-      { "p2U",  0.0, 1.0, 0.0 },
-    };
+    } else {
+      desc = {
+        { "kp2",  0.0, 1.0, 0.0 },
+        { "Vm0",  0.0, 1.0, 0.0 },
+        { "p2U",  0.0, 1.0, 0.0 },
+      };
+    }
   }
-  std::cout << "  Mode: " << desc.size() << " params (";
-  for (size_t i = 0; i < desc.size(); ++i)
-    std::cout << (i ? ", " : "") << desc[i].name;
-  std::cout << ")\n";
+  std::cout << "  Mode: ";
+  if (use_config) {
+    std::cout << "config (JSON)";
+  } else {
+    std::cout << desc.size() << " params (";
+    for (size_t i = 0; i < desc.size(); ++i)
+      std::cout << (i ? ", " : "") << desc[i].name;
+    std::cout << ")";
+  }
+  std::cout << "\n";
 
   Params base_params = Params::defaults_t1d();
-  // Use patient-specific weight from CSV if available (hardcoded for now)
-  // Patient 563 weight = 99 kg
-  base_params.BW = 99.0;
 
   // ---- Load data (first pass) to estimate Gb from CGM ----
   auto data = RealDataReader::load_from_csv(cgm_csv, basal_csv, base_params);
@@ -105,8 +115,20 @@ int main(int argc, char* argv[]) {
 
   // ---- Run pipeline ----
   std::cout << "\n=== Identification pipeline ===\n";
-  auto result = IdentificationPipeline::run(data, base_params, desc,
-                                            n_restarts, cmaes_evals);
+
+  std::vector<ParamDescriptor> full_desc;
+  auto result = use_config
+    ? IdentificationPipeline::run_from_config(data, base_params,
+        UVA_PADOVA_CONFIG_DIR "/default_params.json",
+        n_restarts, cmaes_evals, &full_desc)
+    : IdentificationPipeline::run(data, base_params, desc, n_restarts, cmaes_evals);
+
+  if (!result.success) {
+    std::cerr << "Pipeline failed\n";
+    return 1;
+  }
+
+  const auto& active_desc = use_config ? active_descriptors(full_desc) : desc;
 
   // ---- Print result ----
   std::cout << "\n=== Pipeline result ===\n";
@@ -117,41 +139,53 @@ int main(int argc, char* argv[]) {
     std::cout << (i ? ", " : "") << result.params[i];
   std::cout << "]\n";
 
-  auto recovered = result.to_params(base_params, desc);
+  auto recovered = result.to_params(base_params, active_desc);
   auto default_p = Params::defaults_t1d();
-  std::cout << "  Recovered kp2 = " << recovered.kp2
-            << " (default=" << default_p.kp2 << ")\n";
-  std::cout << "  Recovered Vm0 = " << recovered.Vm0
-            << " (default=" << default_p.Vm0 << ")\n";
-  std::cout << "  Recovered p2U = " << recovered.p2U
-            << " (default=" << default_p.p2U << ")\n";
-  if (mode == "6" || mode == "9") {
-    std::cout << "  Recovered ka1 = " << recovered.ka1
-              << " (default=" << default_p.ka1 << ")\n";
-    std::cout << "  Recovered ka2 = " << recovered.ka2
-              << " (default=" << default_p.ka2 << ")\n";
-    std::cout << "  Recovered kd  = " << recovered.kd
-              << " (default=" << default_p.kd << ")\n";
-  }
-  if (mode == "9") {
-    std::cout << "  Recovered kabs = " << recovered.kabs
-              << " (default=" << default_p.kabs << ")\n";
-    std::cout << "  Recovered Gb   = " << recovered.Gb
-              << " (estimated from CGM=" << base_params.Gb << ")\n";
-    std::cout << "  Recovered VG   = " << recovered.VG
-              << " (default=" << default_p.VG << ")\n";
+
+  for (const auto& d : active_desc) {
+    double rec_val = 0.0, def_val = 0.0;
+    if (d.name == "VG")   { rec_val = recovered.VG;   def_val = default_p.VG; }
+    if (d.name == "k1")   { rec_val = recovered.k1;   def_val = default_p.k1; }
+    if (d.name == "k2")   { rec_val = recovered.k2;   def_val = default_p.k2; }
+    if (d.name == "m1")   { rec_val = recovered.m1;   def_val = default_p.m1; }
+    if (d.name == "m2")   { rec_val = recovered.m2;   def_val = default_p.m2; }
+    if (d.name == "m4")   { rec_val = recovered.m4;   def_val = default_p.m4; }
+    if (d.name == "kmax") { rec_val = recovered.kmax; def_val = default_p.kmax; }
+    if (d.name == "kmin") { rec_val = recovered.kmin; def_val = default_p.kmin; }
+    if (d.name == "kabs") { rec_val = recovered.kabs; def_val = default_p.kabs; }
+    if (d.name == "kgri") { rec_val = recovered.kgri; def_val = default_p.kgri; }
+    if (d.name == "f")    { rec_val = recovered.f;    def_val = default_p.f; }
+    if (d.name == "b")    { rec_val = recovered.b;    def_val = default_p.b; }
+    if (d.name == "d")    { rec_val = recovered.d;    def_val = default_p.d; }
+    if (d.name == "kp1")  { rec_val = recovered.kp1;  def_val = default_p.kp1; }
+    if (d.name == "kp2")  { rec_val = recovered.kp2;  def_val = default_p.kp2; }
+    if (d.name == "kp3")  { rec_val = recovered.kp3;  def_val = default_p.kp3; }
+    if (d.name == "ki")   { rec_val = recovered.ki;   def_val = default_p.ki; }
+    if (d.name == "Vm0")  { rec_val = recovered.Vm0;  def_val = default_p.Vm0; }
+    if (d.name == "Vmx")  { rec_val = recovered.Vmx;  def_val = default_p.Vmx; }
+    if (d.name == "p2U")  { rec_val = recovered.p2U;  def_val = default_p.p2U; }
+    if (d.name == "r1")   { rec_val = recovered.r1;   def_val = default_p.r1; }
+    if (d.name == "Gth")  { rec_val = recovered.Gth;  def_val = default_p.Gth; }
+    if (d.name == "ke1")  { rec_val = recovered.ke1;  def_val = default_p.ke1; }
+    if (d.name == "ke2")  { rec_val = recovered.ke2;  def_val = default_p.ke2; }
+    if (d.name == "ka1")  { rec_val = recovered.ka1;  def_val = default_p.ka1; }
+    if (d.name == "ka2")  { rec_val = recovered.ka2;  def_val = default_p.ka2; }
+    if (d.name == "kd")   { rec_val = recovered.kd;   def_val = default_p.kd; }
+    if (d.name == "Ts")   { rec_val = recovered.Ts;   def_val = default_p.Ts; }
+    if (d.name == "Gb")   { rec_val = recovered.Gb;   def_val = default_p.Gb; }
+    std::cout << "  Recovered " << d.name << " = " << rec_val
+              << " (default=" << def_val << ")\n";
   }
 
   // ---- Posterior cov ----
   std::cout << "\n=== Posterior cov (from pipeline) ===\n";
   if (result.cov.rows() > 0) {
-    std::cout << result.cov << "\n";
     auto print_corr = [&](int i, int j) {
       double c = result.cov(i,j) / std::sqrt(result.cov(i,i) * result.cov(j,j));
-      std::cout << "  corr(" << desc[i].name << "," << desc[j].name << ")=" << c << "\n";
+      std::cout << "  corr(" << active_desc[i].name << "," << active_desc[j].name << ")=" << c << "\n";
     };
-    for (size_t i = 0; i < desc.size(); ++i)
-      for (size_t j = i+1; j < desc.size(); ++j)
+    for (size_t i = 0; i < active_desc.size(); ++i)
+      for (size_t j = i+1; j < active_desc.size(); ++j)
         print_corr(static_cast<int>(i), static_cast<int>(j));
   } else {
     std::cout << "  (empty)\n";
@@ -159,7 +193,7 @@ int main(int argc, char* argv[]) {
 
   // ---- Gate (a) ----
   {
-    auto gate_a = diagnose_multiplicity(result.all_restarts, desc);
+    auto gate_a = diagnose_multiplicity(result.all_restarts, active_desc);
     std::cout << "\n=== Gate (a): multiplicity of minima ===\n";
     std::cout << "  restarts=" << result.all_restarts.size()
               << " clusters=" << gate_a.n_clusters
@@ -176,7 +210,7 @@ int main(int argc, char* argv[]) {
   // ---- Gate (b) ----
   {
     Params base_p = base_params;
-    ObservationCost obs_cost(data, base_p, desc);
+    ObservationCost obs_cost(data, base_p, active_desc);
 
     auto gate_b = diagnose_structural_adequacy(
         data.cgm_time, data.cgm_value, data.meal_time,
@@ -203,10 +237,10 @@ int main(int argc, char* argv[]) {
   // ---- Gate (c) ----
   {
     Params base_p = base_params;
-    ObservationCost obs_cost(data, base_p, desc);
+    ObservationCost obs_cost(data, base_p, active_desc);
 
     auto gate_c = diagnose_observability(
-        result.params.data(), obs_cost, desc);
+        result.params.data(), obs_cost, active_desc);
 
     std::cout << "\n=== Gate (c): observability (SVD/FIM) ===\n";
     std::cout << "  Eigenvalues:";

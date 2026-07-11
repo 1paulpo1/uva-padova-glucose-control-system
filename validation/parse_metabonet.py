@@ -39,13 +39,14 @@ DEFAULT_PARQUET = os.environ.get(
 )
 
 
-def _resolve_weight(parquet_path: str, patient_id: str, fallback: float | None) -> float | None:
+def _resolve_weight(parquet_path: str, patient_id: str, fallback: float | None) -> tuple[float, float] | None:
     """
     Resolve body weight: --weight argument > parquet data.
-    Returns None if no weight found (caller should skip patient).
+    Returns (weight_lbs, weight_kg) or None.
     """
+    w_lbs = None
     if fallback is not None:
-        return fallback
+        return (fallback, fallback)
 
     try:
         t = pq.read_table(
@@ -56,16 +57,14 @@ def _resolve_weight(parquet_path: str, patient_id: str, fallback: float | None) 
         col = t.column("weight")
         valid = pc.drop_null(col)
         if len(valid) > 0:
-            w = valid[0].as_py()
-            if w is not None and w > 0:
-                # Weight may be in lbs (>200) or kg.
-                if w > 200:
-                    w = w * 0.453592  # lbs -> kg
-                return w
+            w_lbs = valid[0].as_py()
     except Exception as exc:
         print(f"  [warning] could not read weight from parquet: {exc}")
 
-    return None
+    if w_lbs is None or w_lbs <= 0:
+        return None
+
+    return (w_lbs, w_lbs * 0.453592)
 
 
 def _aggregate_basal(df):
@@ -128,11 +127,15 @@ def main():
     patient_id = str(args.patient_id)
 
     # ---- Resolve weight ----
-    weight = _resolve_weight(args.parquet, patient_id, args.weight)
-    if weight is None:
+    weight_res = _resolve_weight(args.parquet, patient_id, args.weight)
+    if weight_res is None:
         print(f"Error: no weight found for patient {patient_id} and no --weight given; skipping")
         sys.exit(1)
-    print(f"Patient: {patient_id}, weight={weight:.1f} kg")
+    weight_lbs, weight = weight_res
+    if abs(weight_lbs - weight) < 0.01:
+        print(f"Patient: {patient_id}, weight={weight:.1f} kg (from --weight)")
+    else:
+        print(f"Patient: {patient_id}, weight={weight_lbs:.1f} lbs = {weight:.1f} kg")
 
     # ---- Read parquet ----
     print("  Reading parquet data...")
@@ -195,7 +198,7 @@ def main():
         bolus_u = row["bolus"]
         bolus_pmol_kg = 0.0
         if bolus_u is not None and bolus_u == bolus_u and bolus_u > 0:
-            bolus_pmol_kg = bolus_u * U_TO_PMOL / weight
+            bolus_pmol_kg = round(bolus_u * U_TO_PMOL / weight, 4)
 
         rows.append({
             "t_min": row["t_min"],
@@ -205,7 +208,10 @@ def main():
         })
 
     # ---- Aggregate basal into segments ----
-    basal_segments = _aggregate_basal(df)
+    # Parquet basal is IU delivered in previous 5 min → convert to U/hr
+    df_basal = df.copy()
+    df_basal["basal"] = (df_basal["basal"] * 12.0).round(6)  # IU/5min -> U/hr
+    basal_segments = _aggregate_basal(df_basal)
     basal_rows = []
     for dt, rate in basal_segments:
         t = minutes_since_ref(dt, ref_time)

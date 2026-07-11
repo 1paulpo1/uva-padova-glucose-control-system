@@ -4,6 +4,10 @@
 // Runs identification across multiple configurations and random seeds,
 // computing per-parameter relative errors and posterior correlations.
 // Output: CSV to stdout for downstream visualisation.
+//
+// NOTE: This test uses a 3-param subset (kp2, Vm0, p2U) for speed.
+// The full 21-param configuration (all params except greedy-5 fixed set)
+// is defined in config/default_params.json.
 // =============================================================================
 
 #include <iostream>
@@ -158,11 +162,19 @@ static TrialResult run_trial(const Params& true_p,
   tr.success     = result.success;
 
   // Correlation Vm0 ↔ p2U from posterior covariance
-  if (result.cov.rows() >= 3 && result.cov.cols() >= 3) {
-    int i = 1, j = 2;  // desc order: kp2=0, Vm0=1, p2U=2
-    double cij = result.cov(i, j);
-    double diag_i = result.cov(i, i);
-    double diag_j = result.cov(j, j);
+  auto find_idx = [&](const std::string& name) -> int {
+    for (size_t k = 0; k < desc.size(); ++k)
+      if (desc[k].name == name) return static_cast<int>(k);
+    return -1;
+  };
+  int i_vm0 = find_idx("Vm0");
+  int i_p2u = find_idx("p2U");
+  if (i_vm0 >= 0 && i_p2u >= 0 &&
+      result.cov.rows() > std::max(i_vm0, i_p2u) &&
+      result.cov.cols() > std::max(i_vm0, i_p2u)) {
+    double cij = result.cov(i_vm0, i_p2u);
+    double diag_i = result.cov(i_vm0, i_vm0);
+    double diag_j = result.cov(i_p2u, i_p2u);
     if (diag_i > 0 && diag_j > 0) {
       tr.corr_Vm0_p2U = cij / std::sqrt(diag_i * diag_j);
     } else {

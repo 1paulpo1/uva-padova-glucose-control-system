@@ -106,6 +106,9 @@ static IdentificationData generate_synthetic_data(const Params& true_params,
   return data;
 }
 
+// NOTE: This test uses a 3-param subset (kp2, Vm0, p2U) for speed.
+// The full 21-param production configuration is in config/default_params.json.
+
 // ---------------------------------------------------------------------------
 // Main test
 // ---------------------------------------------------------------------------

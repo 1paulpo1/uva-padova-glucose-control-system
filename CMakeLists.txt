@@ -19,6 +19,16 @@ find_package(Ceres REQUIRED)
 find_package(NLopt REQUIRED)
 find_package(libcmaes REQUIRED)
 
+# nlohmann/json (header-only, zero-dependency)
+include(FetchContent)
+FetchContent_Declare(
+  nlohmann_json
+  GIT_REPOSITORY https://github.com/nlohmann/json.git
+  GIT_TAG v3.11.3
+)
+set(JSON_BuildTests OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(nlohmann_json)
+
 find_package(matplotplusplus QUIET)
 if(matplotplusplus_FOUND)
   set(HAS_MATPLOTPLUS ON)
@@ -65,6 +75,12 @@ target_link_libraries(uva_padova_id
     ${CERES_LIBRARIES}
     NLopt::nlopt
     libcmaes::cmaes
+    nlohmann_json::nlohmann_json
+)
+
+target_sources(uva_padova_id
+  PRIVATE
+    src/config_loader.cpp
 )
 
 target_compile_options(uva_padova_core PRIVATE -Wall -Wextra -Wpedantic)

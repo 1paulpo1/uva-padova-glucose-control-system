@@ -179,7 +179,8 @@ def quick_check_window(parquet_path: str, patient_id: str, n_days: int,
 
 def check_csv_quality(cgm_csv: str, basal_csv: str) -> dict:
     result = dict(cgm_count=0, meal_count=0, bolus_count=0,
-                  basal_segments=0, total_min=0, has_data=False)
+                  basal_segments=0, total_min=0, has_data=False,
+                  cgm_density=0.0)
     if not os.path.exists(cgm_csv) or not os.path.exists(basal_csv):
         return result
     with open(cgm_csv, newline="") as f:
@@ -199,6 +200,7 @@ def check_csv_quality(cgm_csv: str, basal_csv: str) -> dict:
     with open(basal_csv, newline="") as f:
         result["basal_segments"] = sum(1 for _ in csv.DictReader(f))
     result["has_data"] = result["cgm_count"] > 0
+    result["cgm_density"] = result["cgm_count"] / max(1, result["total_min"] / 5)
     return result
 
 
@@ -441,8 +443,9 @@ def evaluate_batch(patients_batch: list, thresholds: dict) -> tuple[bool, str | 
                  and p.get("gate_a", {}).get("passed", False)
                  and p.get("gate_b", {}).get("passed", False))
 
-    if n_crash >= 3:
-        return (True, f"Systemic crash: {n_crash}/{n} patients failed to run")
+    crash_rate = n_crash / n
+    if crash_rate > thresholds.get("crash", 0.5):
+        return (True, f"Crash rate {crash_rate:.0%} > {thresholds['crash']:.0%} ({n_crash}/{n})")
     if n_ok == 0:
         return (True, f"All {n} patients crashed")
 
@@ -530,6 +533,11 @@ def print_dashboard(patients_batch: list, batch_idx: int, batch_size: int,
         print(f"  Condition #: min={min(conds):.1e}  median={sorted(conds)[len(conds)//2]:.1e}  max={max(conds):.1e}")
     if costs:
         print(f"  Cost:        min={min(costs):.3e}  median={sorted(costs)[len(costs)//2]:.3e}  max={max(costs):.3e}")
+    densities = [p.get("cgm_density", 0) for p in patients_batch
+                 if p.get("cgm_density", 0) > 0]
+    if densities:
+        d_min, d_avg, d_max = min(densities), sum(densities)/len(densities), max(densities)
+        print(f"  CGM density: min={d_min:.0%}  avg={d_avg:.0%}  max={d_max:.0%}")
     avg_time = sum(p.get("wall_time_s", 0) for p in patients_batch) / n
     print(f"  Avg wall:    {avg_time:.1f}s/patient")
     print()
@@ -575,6 +583,10 @@ def main():
                     help="Not a blocker, only reported")
     ap.add_argument("--no-cache", action="store_true",
                     help="Force re-scan parquet, ignore cache")
+    ap.add_argument("--crash-threshold", type=float, default=0.5,
+                    help="Max crash fraction before early-stop (default: 0.5)")
+    ap.add_argument("--min-cgm-density", type=float, default=0.5,
+                    help="Min CGM density (non-zero / expected 5-min slots, default: 0.5)")
     args = ap.parse_args()
 
     # ── Resolve paths ──────────────────────────────────────────────────
@@ -601,6 +613,7 @@ def main():
         "gate_a": args.gate_a_threshold,
         "gate_b": args.gate_b_threshold,
         "pass_rate_min": args.pass_rate_min,
+        "crash": args.crash_threshold,
     }
 
     # ── Load or init results ───────────────────────────────────────────
@@ -722,11 +735,15 @@ def main():
                     batch_record["patients"].append(pr)
                     processed.add(pid)
                     total_done += 1
+                    results["batches"].append({"batch": batch_idx, "patient": pr})
+                    results["processed_ids"] = sorted(processed)
+                    save_results(str(results_path), results)
                     continue
                 print("OK")
 
             # Check CSV quality
             quality = check_csv_quality(str(cgm_csv), str(basal_csv))
+            cgm_density = quality.get("cgm_density", 0)
             if not quality["has_data"]:
                 print(f"  [{pid}] SKIP (no CGM data)")
                 pr = {"id": pid, "batch": batch_idx,
@@ -734,7 +751,24 @@ def main():
                 batch_record["patients"].append(pr)
                 processed.add(pid)
                 total_done += 1
+                results["batches"].append({"batch": batch_idx, "patient": pr})
+                results["processed_ids"] = sorted(processed)
+                save_results(str(results_path), results)
                 # Clean up useless CSVs
+                for p in [cgm_csv, basal_csv]:
+                    if p.exists():
+                        p.unlink()
+                continue
+            if args.min_cgm_density > 0 and cgm_density < args.min_cgm_density:
+                print(f"  [{pid}] SKIP (CGM density {cgm_density:.0%} < {args.min_cgm_density:.0%})")
+                pr = {"id": pid, "batch": batch_idx,
+                      "error": f"CGM density {cgm_density:.0%}"}
+                batch_record["patients"].append(pr)
+                processed.add(pid)
+                total_done += 1
+                results["batches"].append({"batch": batch_idx, "patient": pr})
+                results["processed_ids"] = sorted(processed)
+                save_results(str(results_path), results)
                 for p in [cgm_csv, basal_csv]:
                     if p.exists():
                         p.unlink()
@@ -746,6 +780,7 @@ def main():
                              args.restarts, args.evals, args.mode, args.timeout)
             pr["id"] = pid
             pr["batch"] = batch_idx
+            pr["cgm_density"] = cgm_density
             batch_record["patients"].append(pr)
 
             if pr.get("error"):

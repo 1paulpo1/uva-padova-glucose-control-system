@@ -1,0 +1,301 @@
+╔══════════════════════════════════════════════════════════════════════════╗
+║   COMPREHENSIVE STRUCTURAL IDENTIFIABILITY ANALYSIS                      ║
+║    UVA-Padova T1DM Model — all 37 parameters                             ║
+║   2026-07-11T16:15:22.336                                                         ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+── P5: GI ABSORPTION (linear, no tanh) ──
+
+  RESULTS:
+  P5a (y=Ra):
+    Qsto1(t)                   locally
+    Qsto2(t)                   locally
+    Qgut(t)                    locally
+    BW                         nonidentifiable
+    f                          nonidentifiable
+    kabs                       locally
+    kgri                       locally
+    kmax                       locally
+
+  P5b (y=Qgut):
+    Qsto1(t)                   locally
+    Qsto2(t)                   locally
+    Qgut(t)                    globally
+    kabs                       globally
+    kgri                       locally
+    kmax                       locally
+
+  P5c (y1=Ra,y2=Qgut):
+    Qsto1(t)                   locally
+    Qsto2(t)                   locally
+    Qgut(t)                    globally
+    BW                         nonidentifiable
+    f                          nonidentifiable
+    kabs                       globally
+    kgri                       locally
+    kmax                       locally
+
+  P5d: Identifiable functions from y=Ra:
+    [1]  kabs + kgri + kmax
+    [2]  BW//f
+    [3]  kabs*kgri + kabs*kmax + kgri*kmax
+    [4]  kabs*kgri*kmax
+
+  P5e (fixed BW=75, y=Ra):
+    Qsto1(t)                   locally
+    Qsto2(t)                   locally
+    Qgut(t)                    locally
+    f                          globally
+    kabs                       locally
+    kgri                       locally
+    kmax                       locally
+
+  Interpretation:
+    • From Ra alone: all kinetic params (kgri, kmax, kabs) locally id; f, BW non-id
+    • From Qgut alone: kabs globally id; kgri, kmax locally id
+    • Dual output makes kabs globally id, but f,BW still non-id (scaling symmetry)
+    • Identifiable combinations: BW/f, kabs+kgri+kmax, kabs·kgri·kmax
+    • Fixing BW=75 makes f globally id (breaks BW/f symmetry)
+
+── P6: GI + GLUCOSE CORE (combined) ──
+  Note: 6 states + rational MM term → global analysis infeasible (~80 GB)
+  Local identifiability only.
+
+  Local results:
+    Qsto1(t)                   locally id
+    Qsto2(t)                   locally id
+    Qgut(t)                    locally id
+    Gp(t)                      non-id
+    Gt(t)                      non-id
+    Gsc(t)                     locally id
+    BW                         non-id
+    Fcns                       non-id
+    Km0                        non-id
+    Ts                         locally id
+    VG                         non-id
+    Vm0                        non-id
+    Vmx                        non-id
+    f                          non-id
+    k1                         locally id
+    k2                         locally id
+    kabs                       locally id
+    kgri                       locally id
+    kmax                       locally id
+    kp1                        non-id
+    kp2                        locally id
+    kp3                        non-id
+
+  Interpretation:
+    • GI params (kgri,kmax,kabs,k1,k2,Ts): locally id in combined model
+    • Glucose core non-id params unaffected by GI addition
+      (same structural scaling symmetries: kp1,kp3,Fcns,VG,Vm0,Vmx,Km0)
+
+── P7: GLUCOSE + RENAL EXCRETION ──
+  Note: MM term + ke1·ke2 product → global analysis infeasible
+  Local identifiability only.
+
+  P7a: EGP active + renal
+    Gp(t)                      non-id
+    Gt(t)                      non-id
+    Gsc(t)                     locally id
+    Fcns                       non-id
+    Km0                        non-id
+    Ts                         locally id
+    VG                         non-id
+    Vm0                        non-id
+    Vmx                        non-id
+    k1                         locally id
+    k2                         locally id
+    ke1                        non-id
+    ke2                        non-id
+    kp1                        non-id
+    kp2                        non-id
+    kp3                        non-id
+
+  P7b: EGP suppressed + renal
+    Gp(t)                      non-id
+    Gt(t)                      non-id
+    Gsc(t)                     locally id
+    Fcns                       non-id
+    Km0                        non-id
+    Ts                         locally id
+    VG                         non-id
+    Vm0                        non-id
+    Vmx                        non-id
+    k1                         locally id
+    k2                         locally id
+    ke1                        locally id
+    ke2                        non-id
+
+  Interpretation:
+    • ke1: locally id when EGP ON (Gp term provides excitation)
+    • ke1: non-id when EGP OFF (no EGP to perturb Gp)
+    • ke2: always non-id (threshold, only active when Gp > ke2)
+    • All other non-id params same as P4 glucose core
+
+── P8: IDENTIFIABLE FUNCTIONS ──
+
+  P8a: Glucose core identifiable functions (from C:\Users\beleg\OneDrive\Documents\uva-padova-cpp\validation\identifiability):
+    [1]  kp2
+    [2]  k2
+    [3]  k1
+    [4]  Ts
+    [5]  Vmx//kp3
+    [6]  Vm0//kp3
+    [7]  VG//kp3
+    [8]  Km0//kp3
+    [9]  (Fcns - kp1)//kp3
+
+  P8b: Key identifiable ratios (from analytic reasoning):
+    EGP equation:
+      • (Fcns - kp1) / kp3  — identifiable (CNS uptake relative to EGP sensitivity)
+      • kp2                — globally identifiable (glucose effectiveness)
+    Utilization (MM) equation:
+      • Vm0 / kp3          — identifiable (max utilization / EGP sensitivity)
+      • Vmx / kp3          — identifiable (insulin-sensitive util. / EGP sensitivity)
+      • Km0 / kp3          — identifiable (MM constant / EGP sensitivity)
+    Glucose volume:
+      • VG / kp3           — identifiable (volume / EGP sensitivity)
+    GI absorption:
+      • f / BW             — identifiable (GI flux / body weight)
+      • kabs + kgri + kmax — identifiable (sum of rates)
+      • kabs · kgri · kmax — identifiable (product of rates)
+
+── P9: REMEDIATION SCENARIOS ──
+
+  P9a: Fix VG = 1.88 (literature value):
+    [1]  kp3
+    [2]  kp2
+    [3]  k2
+    [4]  k1
+    [5]  Vmx
+    [6]  Vm0
+    [7]  Ts
+    [8]  Km0
+    [9]  Fcns - kp1
+
+  P9b: Fix kp3 = 0.009 (literature value):
+    [1]  kp2
+    [2]  k2
+    [3]  k1
+    [4]  Vmx
+    [5]  Vm0
+    [6]  VG
+    [7]  Ts
+    [8]  Km0
+    [9]  Fcns - kp1
+
+  P9c: Dual output (Gsc + Ip) — full 13-state model (local):
+    Qsto1(t)                   locally id
+    Qsto2(t)                   locally id
+    Qgut(t)                    locally id
+    Isc1(t)                    locally id
+    Isc2(t)                    locally id
+    Ip(t)                      locally id
+    Ii(t)                      locally id
+    I_prime(t)                 non-id
+    Xl(t)                      non-id
+    X(t)                       non-id
+    Gp(t)                      non-id
+    Gt(t)                      non-id
+    Gsc(t)                     locally id
+    BW                         non-id
+    Fcns                       non-id
+    Ib                         non-id
+    Km0                        non-id
+    Ts                         locally id
+    VG                         non-id
+    VI                         non-id
+    Vm0                        non-id
+    Vmx                        non-id
+    f                          non-id
+    k1                         locally id
+    k2                         locally id
+    ka1                        locally id
+    ka2                        locally id
+    kabs                       locally id
+    kd                         locally id
+    kgri                       locally id
+    ki                         locally id
+    kmax                       locally id
+    kp1                        non-id
+    kp2                        locally id
+    kp3                        non-id
+    m1                         locally id
+    m2                         locally id
+    m4                         locally id
+    p2U                        locally id
+
+  P9e: Fix BW = 75:
+    Qsto1(t)                   locally
+    Qsto2(t)                   locally
+    Qgut(t)                    locally
+    f                          globally
+    kabs                       locally
+    kgri                       locally
+    kmax                       locally
+
+══ MASTER TABLE: All 37 parameters ══
+
+  G = globally id   L = locally id   N = non-id   — = dormant
+
+  Parameter  Global  Category
+  ------------------------------------------
+  VG        N       Glucose kinetics
+  k1        G       Glucose kinetics
+  k2        G       Glucose kinetics
+  VI        G       Insulin kinetics
+  m1        L       Insulin kinetics
+  m2        L       Insulin kinetics
+  m4        L       Insulin kinetics
+  kmax      L       GI absorption
+  kmin      —       GI abs. (dormant)
+  kabs      L       GI absorption
+  kgri      L       GI absorption
+  f         N       GI absorption
+  b         —       GI abs. (dormant)
+  d         —       GI abs. (dormant)
+  kp1       N       EGP
+  kp2       G       EGP
+  kp3       N       EGP
+  ki        G       EGP
+  Fcns      N       Utilization
+  Vm0       N       Utilization
+  Vmx       N       Utilization
+  Km0       N       Utilization
+  p2U       G       Utilization
+  r1        —       Utilization (dormant)
+  Gth       —       Utilization (dormant)
+  ke1       L       Renal
+  ke2       N       Renal
+  ka1       G       SC insulin
+  ka2       L       SC insulin
+  kd        L       SC insulin
+  Ts        G       CGM sensor
+  BW        N       Subject
+  Gb        —       Subject (dormant)
+  Ib        G       Subject
+
+── FILES GENERATED ──
+
+  p5a_gi_alone.csv
+  p5a_gi_alone_global.csv
+  p5b_gi_qgut.csv
+  p5b_gi_qgut_global.csv
+  p5c_gi_dual.csv
+  p5c_gi_dual_global.csv
+  p5d_gi_functions.csv
+  p5e_gi_fixed_bw.csv
+  p6_gi_glucose_local.csv
+  p7a_glu_renal_on_local.csv
+  p7b_glu_renal_off_local.csv
+  p8a_glu_core_functions.csv
+  p9a_fix_vg.csv
+  p9b_fix_kp3.csv
+  p9c_dual_output_local.csv
+  pop_sens_orig.csv
+  pop_sens_pert.csv
+  prior_fix_comparison.csv
+  prior_fix_log_greedy.csv
+  prior_fix_log_hierarchy.csv
+

@@ -1,0 +1,17 @@
+iteration,fixed_param,remaining,total_L,newly_L,time_s,L_list,N_list
+0,-,26,15,0,20.1260559,Ts;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;m1;m2;m4;p2U,BW;Fcns;Ib;Km0;VG;VI;Vm0;Vmx;f;kp1;kp3
+1,BW,25,15,0,19.6023135,Ts;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;m1;m2;m4;p2U,Fcns;Ib;Km0;VG;VI;Vm0;Vmx;f;kp1;kp3
+2,f,24,17,2,19.0443371,Km0;Ts;VG;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;m1;m2;m4;p2U,Fcns;Ib;VI;Vm0;Vmx;kp1;kp3
+3,VG,23,16,-1,19.1810566,Km0;Ts;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;m1;m2;m4;p2U,Fcns;Ib;VI;Vm0;Vmx;kp1;kp3
+4,VI,22,18,2,18.7948795,Km0;Ts;Vmx;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;kp3;m1;m2;m4;p2U,Fcns;Ib;Vm0;kp1
+5,Ts,21,17,-1,18.4676428,Km0;Vmx;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;kp3;m1;m2;m4;p2U,Fcns;Ib;Vm0;kp1
+6,k1,20,16,-1,18.326304,Km0;Vmx;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;kp3;m1;m2;m4;p2U,Fcns;Ib;Vm0;kp1
+7,k2,19,15,-1,18.0349236,Km0;Vmx;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;kp3;m1;m2;m4;p2U,Fcns;Ib;Vm0;kp1
+8,Ib,18,16,1,18.2072772,Km0;Vm0;Vmx;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;kp3;m1;m2;m4;p2U,Fcns;kp1
+9,kgri,17,15,-1,17.719192,Km0;Vm0;Vmx;ka1;ka2;kabs;kd;ki;kmax;kp2;kp3;m1;m2;m4;p2U,Fcns;kp1
+10,kmax,16,14,-1,17.7721416,Km0;Vm0;Vmx;ka1;ka2;kabs;kd;ki;kp2;kp3;m1;m2;m4;p2U,Fcns;kp1
+11,kabs,15,13,-1,17.6995588,Km0;Vm0;Vmx;ka1;ka2;kd;ki;kp2;kp3;m1;m2;m4;p2U,Fcns;kp1
+12,Vm0,14,12,-1,17.4495004,Km0;Vmx;ka1;ka2;kd;ki;kp2;kp3;m1;m2;m4;p2U,Fcns;kp1
+13,Vmx,13,11,-1,17.4412143,Km0;ka1;ka2;kd;ki;kp2;kp3;m1;m2;m4;p2U,Fcns;kp1
+14,Km0,12,10,-1,17.1047689,ka1;ka2;kd;ki;kp2;kp3;m1;m2;m4;p2U,Fcns;kp1
+15,kp1,11,11,1,17.0861284,Fcns;ka1;ka2;kd;ki;kp2;kp3;m1;m2;m4;p2U,

@@ -1,0 +1,10 @@
+i,function,subsystem
+1,kp2,Fixed kp3=0.009
+2,k2,Fixed kp3=0.009
+3,k1,Fixed kp3=0.009
+4,Vmx,Fixed kp3=0.009
+5,Vm0,Fixed kp3=0.009
+6,VG,Fixed kp3=0.009
+7,Ts,Fixed kp3=0.009
+8,Km0,Fixed kp3=0.009
+9,Fcns - kp1,Fixed kp3=0.009

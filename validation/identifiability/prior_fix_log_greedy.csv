@@ -1,0 +1,7 @@
+iteration,fixed_param,remaining,total_L,newly_L,time_s,L_list,N_list
+0,-,26,15,0,19.7368573,Ts;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;m1;m2;m4;p2U,BW;Fcns;Ib;Km0;VG;VI;Vm0;Vmx;f;kp1;kp3
+1,Km0,25,16,1,0.0,Ts;VG;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;m1;m2;m4;p2U,BW;Fcns;Ib;VI;Vm0;Vmx;f;kp1;kp3
+2,VI,24,18,2,0.0,Ts;VG;Vmx;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;kp3;m1;m2;m4;p2U,BW;Fcns;Ib;Vm0;f;kp1
+3,BW,23,19,1,0.0,Ts;VG;Vmx;f;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp2;kp3;m1;m2;m4;p2U,Fcns;Ib;Vm0;kp1
+4,Fcns,22,20,1,0.0,Ts;VG;Vmx;f;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp1;kp2;kp3;m1;m2;m4;p2U,Ib;Vm0
+5,Ib,21,21,1,0.0,Ts;VG;Vm0;Vmx;f;k1;k2;ka1;ka2;kabs;kd;kgri;ki;kmax;kp1;kp2;kp3;m1;m2;m4;p2U,

@@ -1,0 +1,5 @@
+variable,identifiability,subsystem
+I_prime(t),globally,EGP delay (input=Ip, output=Xl)
+Xl(t),globally,EGP delay (input=Ip, output=Xl)
+VI,globally,EGP delay (input=Ip, output=Xl)
+ki,globally,EGP delay (input=Ip, output=Xl)

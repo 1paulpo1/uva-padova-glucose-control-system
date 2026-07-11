@@ -1,0 +1,11 @@
+variable,identifiability,subsystem
+Isc1(t),locally,Insulin kinetics (y1=Ip, y2=Ii)
+Isc2(t),locally,Insulin kinetics (y1=Ip, y2=Ii)
+Ip(t),globally,Insulin kinetics (y1=Ip, y2=Ii)
+Ii(t),globally,Insulin kinetics (y1=Ip, y2=Ii)
+ka1,globally,Insulin kinetics (y1=Ip, y2=Ii)
+ka2,locally,Insulin kinetics (y1=Ip, y2=Ii)
+kd,locally,Insulin kinetics (y1=Ip, y2=Ii)
+m1,globally,Insulin kinetics (y1=Ip, y2=Ii)
+m2,globally,Insulin kinetics (y1=Ip, y2=Ii)
+m4,globally,Insulin kinetics (y1=Ip, y2=Ii)

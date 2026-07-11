@@ -1,0 +1,5 @@
+i,function,subsystem
+1,kabs + kgri + kmax,GI identifiable functions (y=Ra)
+2,BW//f,GI identifiable functions (y=Ra)
+3,kabs*kgri + kabs*kmax + kgri*kmax,GI identifiable functions (y=Ra)
+4,kabs*kgri*kmax,GI identifiable functions (y=Ra)

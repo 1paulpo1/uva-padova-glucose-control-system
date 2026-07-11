@@ -1,0 +1,10 @@
+i,function,subsystem
+1,kp3,Fixed VG=1.88
+2,kp2,Fixed VG=1.88
+3,k2,Fixed VG=1.88
+4,k1,Fixed VG=1.88
+5,Vmx,Fixed VG=1.88
+6,Vm0,Fixed VG=1.88
+7,Ts,Fixed VG=1.88
+8,Km0,Fixed VG=1.88
+9,Fcns - kp1,Fixed VG=1.88

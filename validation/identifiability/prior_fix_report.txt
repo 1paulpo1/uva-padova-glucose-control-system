@@ -1,0 +1,110 @@
+╔══════════════════════════════════════════════════════════════════════════╗
+║  PRIOR FIXING EXPERIMENT                                               ║
+║  UVA-Padova T1DM — sequential parameter fixing with population priors  ║
+║  2026-07-11T14:50:55.079                                                          ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+── DESIGN ──
+  Model: full 13-state, 27-param, y=Gsc, inputs=u, u_meal
+  Method: Local identifiability (p=0.99) after each parameter fix
+  Parallel: independent evaluations run as subprocesses
+
+  Greedy:    at each step fix the N param that unlocks the most new Ls
+  Hierarchy: fix in physiological order
+
+══ SUMMARY ══
+
+  Greedy:   5 fixed  → 21/21 L  (0 N)
+  Hierarchy: 15 fixed → 11/11 L  (0 N)
+
+── GREEDY FULL LOG ──
+  Iter  Fixed      Rem  L    +New  N_list
+  --------------------------------------------------------------------------------
+  0     —          26   15   +0    BW, Fcns, Ib, Km0, VG, VI, Vm0, Vmx, f, kp1, kp3
+  1     Km0        25   16   +1    BW, Fcns, Ib, VI, Vm0, Vmx, f, kp1, kp3
+  2     VI         24   18   +2    BW, Fcns, Ib, Vm0, f, kp1
+  3     BW         23   19   +1    Fcns, Ib, Vm0, kp1
+  4     Fcns       22   20   +1    Ib, Vm0
+  5     Ib         21   21   +1    
+
+── HIERARCHY FULL LOG ──
+  Iter  Fixed      Rem  L    +New  Time     N_list
+  --------------------------------------------------------------------------------
+  0     —          26   15   +0    20.1 s   BW, Fcns, Ib, Km0, VG, VI, Vm0, Vmx, f, kp1, kp3
+  1     BW         25   15   +0    19.6 s   Fcns, Ib, Km0, VG, VI, Vm0, Vmx, f, kp1, kp3
+  2     f          24   17   +2    19.0 s   Fcns, Ib, VI, Vm0, Vmx, kp1, kp3
+  3     VG         23   16   +-1   19.2 s   Fcns, Ib, VI, Vm0, Vmx, kp1, kp3
+  4     VI         22   18   +2    18.8 s   Fcns, Ib, Vm0, kp1
+  5     Ts         21   17   +-1   18.5 s   Fcns, Ib, Vm0, kp1
+  6     k1         20   16   +-1   18.3 s   Fcns, Ib, Vm0, kp1
+  7     k2         19   15   +-1   18.0 s   Fcns, Ib, Vm0, kp1
+  8     Ib         18   16   +1    18.2 s   Fcns, kp1
+  9     kgri       17   15   +-1   17.7 s   Fcns, kp1
+  10    kmax       16   14   +-1   17.8 s   Fcns, kp1
+  11    kabs       15   13   +-1   17.7 s   Fcns, kp1
+  12    Vm0        14   12   +-1   17.4 s   Fcns, kp1
+  13    Vmx        13   11   +-1   17.4 s   Fcns, kp1
+  14    Km0        12   10   +-1   17.1 s   Fcns, kp1
+  15    kp1        11   11   +1    17.1 s   
+
+── PARAMETER COMPARISON ──
+  Param     Greedy                        Hierarchy                   
+  -------------------------------------------------------------------
+  BW        fixed@3 (+1)                  fixed@1 (+0)                
+  Fcns      fixed@4 (+1)                  L                           
+  Ib        fixed@5 (+1)                  fixed@8 (+1)                
+  Km0       fixed@1 (+1)                  fixed@14 (+-1)              
+  Ts        L                             fixed@5 (+-1)               
+  VG        L                             fixed@3 (+-1)               
+  VI        fixed@2 (+2)                  fixed@4 (+2)                
+  Vm0       L                             fixed@12 (+-1)              
+  Vmx       L                             fixed@13 (+-1)              
+  f         L                             fixed@2 (+2)                
+  k1        L                             fixed@6 (+-1)               
+  k2        L                             fixed@7 (+-1)               
+  ka1       L                             L                           
+  ka2       L                             L                           
+  kabs      L                             fixed@11 (+-1)              
+  kd        L                             L                           
+  kgri      L                             fixed@9 (+-1)               
+  ki        L                             L                           
+  kmax      L                             fixed@10 (+-1)              
+  kp1       L                             fixed@15 (+1)               
+  kp2       L                             L                           
+  kp3       L                             L                           
+  m1        L                             L                           
+  m2        L                             L                           
+  m4        L                             L                           
+  p2U       L                             L                           
+
+── PRIOR SETS ──
+
+  Greedy order (5):
+    Km0      iter 1  +1 new L
+    VI       iter 2  +2 new L
+    BW       iter 3  +1 new L
+    Fcns     iter 4  +1 new L
+    Ib       iter 5  +1 new L
+
+  Hierarchy order (15):
+    BW       iter 1  +0 new L
+    f        iter 2  +2 new L
+    VG       iter 3  +-1 new L
+    VI       iter 4  +2 new L
+    Ts       iter 5  +-1 new L
+    k1       iter 6  +-1 new L
+    k2       iter 7  +-1 new L
+    Ib       iter 8  +1 new L
+    kgri     iter 9  +-1 new L
+    kmax     iter 10  +-1 new L
+    kabs     iter 11  +-1 new L
+    Vm0      iter 12  +-1 new L
+    Vmx      iter 13  +-1 new L
+    Km0      iter 14  +-1 new L
+    kp1      iter 15  +1 new L
+
+── FILES ──
+  prior_fix_log_greedy.csv
+  prior_fix_log_hierarchy.csv
+  prior_fix_comparison.csv
+

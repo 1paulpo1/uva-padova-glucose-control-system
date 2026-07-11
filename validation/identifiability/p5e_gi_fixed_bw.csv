@@ -1,0 +1,8 @@
+variable,result,subsystem
+Qsto1(t),locally,GI fixed BW=75
+Qsto2(t),locally,GI fixed BW=75
+Qgut(t),locally,GI fixed BW=75
+f,globally,GI fixed BW=75
+kabs,locally,GI fixed BW=75
+kgri,locally,GI fixed BW=75
+kmax,locally,GI fixed BW=75

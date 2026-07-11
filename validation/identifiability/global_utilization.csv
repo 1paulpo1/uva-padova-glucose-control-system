@@ -1,0 +1,5 @@
+variable,identifiability,subsystem
+X(t),globally,Utilization delay (input=Ip, output=X)
+Ib,globally,Utilization delay (input=Ip, output=X)
+VI,globally,Utilization delay (input=Ip, output=X)
+p2U,globally,Utilization delay (input=Ip, output=X)

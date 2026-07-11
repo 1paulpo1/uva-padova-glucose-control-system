@@ -1,0 +1,9 @@
+variable,result,subsystem
+Qsto1(t),locally,GI alone (y=Ra)
+Qsto2(t),locally,GI alone (y=Ra)
+Qgut(t),locally,GI alone (y=Ra)
+BW,nonidentifiable,GI alone (y=Ra)
+f,nonidentifiable,GI alone (y=Ra)
+kabs,locally,GI alone (y=Ra)
+kgri,locally,GI alone (y=Ra)
+kmax,locally,GI alone (y=Ra)

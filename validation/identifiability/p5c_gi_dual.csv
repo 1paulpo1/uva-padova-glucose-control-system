@@ -1,0 +1,9 @@
+variable,result,subsystem
+Qsto1(t),locally,GI dual output (y1=Ra, y2=Qgut)
+Qsto2(t),locally,GI dual output (y1=Ra, y2=Qgut)
+Qgut(t),globally,GI dual output (y1=Ra, y2=Qgut)
+BW,nonidentifiable,GI dual output (y1=Ra, y2=Qgut)
+f,nonidentifiable,GI dual output (y1=Ra, y2=Qgut)
+kabs,globally,GI dual output (y1=Ra, y2=Qgut)
+kgri,locally,GI dual output (y1=Ra, y2=Qgut)
+kmax,locally,GI dual output (y1=Ra, y2=Qgut)

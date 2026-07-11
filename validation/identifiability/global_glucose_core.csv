@@ -1,0 +1,12 @@
+variable,identifiability,subsystem
+Fcns,nonidentifiable,Glucose core (inputs=Xl,X)
+Km0,nonidentifiable,Glucose core (inputs=Xl,X)
+Ts,globally,Glucose core (inputs=Xl,X)
+VG,nonidentifiable,Glucose core (inputs=Xl,X)
+Vm0,nonidentifiable,Glucose core (inputs=Xl,X)
+Vmx,nonidentifiable,Glucose core (inputs=Xl,X)
+k1,globally,Glucose core (inputs=Xl,X)
+k2,globally,Glucose core (inputs=Xl,X)
+kp1,nonidentifiable,Glucose core (inputs=Xl,X)
+kp2,globally,Glucose core (inputs=Xl,X)
+kp3,nonidentifiable,Glucose core (inputs=Xl,X)

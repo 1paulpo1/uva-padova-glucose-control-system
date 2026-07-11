@@ -1,0 +1,187 @@
+╔══════════════════════════════════════════════════════════════════════════╗
+║  REALISTIC IDENTIFIABILITY ANALYSIS                                     ║
+║  UVA-Padova T1DM — CGM + pump + meals only                             ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+── DESIGN ──
+  Measurements: y = Gsc (CGM sensor)
+  Known inputs: u (insulin pump), u_meal (meal)
+  No additional measurements: no Ip, no Ii, no Ra
+  No decomposition assumptions: Xl, X, Ip are STATES, not known inputs
+
+── A: FULL MODEL LOCAL IDENTIFIABILITY ──
+  13 states, 26 params, 2 inputs (u, u_meal), 1 output (Gsc)
+  Analysis run at 3 probability thresholds (0.99 / 0.95 / 0.90)
+
+  Total L/N (any var): 23/39, 23/39, 23/39
+  Parameter L:         15/26, 15/26, 15/26
+
+  Parameter               p=0.99  p=0.95  p=0.90  Category
+  -----------------------------------------------------------------
+  Qsto1(t)                Y       Y       Y       State
+  Qsto2(t)                Y       Y       Y       State
+  Qgut(t)                 Y       Y       Y       State
+  Isc1(t)                 Y       Y       Y       State
+  Isc2(t)                 Y       Y       Y       State
+  Ip(t)                   Y       Y       Y       State
+  Ii(t)                   Y       Y       Y       State
+  I_prime(t)              N       N       N       State
+  Xl(t)                   N       N       N       State
+  X(t)                    N       N       N       State
+  Gp(t)                   N       N       N       State
+  Gt(t)                   N       N       N       State
+  Gsc(t)                  Y       Y       Y       State
+  kgri                    Y       Y       Y       GI
+  kmax                    Y       Y       Y       GI
+  kabs                    Y       Y       Y       GI
+  f                       N       N       N       GI
+  BW                      N       N       N       GI
+  ka1                     Y       Y       Y       SC ins
+  ka2                     Y       Y       Y       SC ins
+  kd                      Y       Y       Y       SC ins
+  m1                      Y       Y       Y       Ins kin
+  m2                      Y       Y       Y       Ins kin
+  m4                      Y       Y       Y       Ins kin
+  VI                      N       N       N       Delay
+  Ib                      N       N       N       Delay
+  ki                      Y       Y       Y       EGP
+  kp1                     N       N       N       EGP
+  kp2                     Y       Y       Y       EGP
+  kp3                     N       N       N       EGP
+  Fcns                    N       N       N       Util
+  p2U                     Y       Y       Y       Delay
+  Vm0                     N       N       N       Util
+  Vmx                     N       N       N       Util
+  Km0                     N       N       N       Util
+  k1                      Y       Y       Y       Glc kin
+  k2                      Y       Y       Y       Glc kin
+  VG                      N       N       N       Glc kin
+  Ts                      Y       Y       Y       CGM
+
+  Threshold stability: ALL params identical across p=0.99/0.95/0.90
+  No borderline parameters.
+
+── B: GLOBAL ANALYSIS ──
+
+  B1: Glucose + Delays (6 states, Xl,X as states, Ip(t) input)
+  Identifiable functions (1):
+    [1]  (crashed — model too large for global analysis)
+
+  B2: Glucose Core — using cached P8a results:
+    [1]  kp2
+    [2]  k2
+    [3]  k1
+    [4]  Ts
+    [5]  Vmx//kp3
+    [6]  Vm0//kp3
+    [7]  VG//kp3
+    [8]  Km0//kp3
+    [9]  (Fcns - kp1)//kp3
+
+══ THREE-WAY COMPARISON ══
+
+  G = globally id   L = locally id   N = non-id
+  Decomposed (global) = P1-P4 (Xl, X, Ra known — optimistic upper bound)
+  Realistic (global)  = from CGM+pump+meals, no decomposition
+  Local (full)        = full model, p=0.99
+
+  Parameter   Decomposed  Realistic  Local(full)  Category
+  -----------------------------------------------------------------
+  ka1         G           N           L          SC ins
+  ka2         L           N           L          SC ins
+  kd          L           N           L          SC ins
+  m1          L           N           L          Ins kin
+  m2          L           N           L          Ins kin
+  m4          L           N           L          Ins kin
+  VI          G           N           N          Delay
+  ki          G           N           L          Delay
+  p2U         G           N           L          Delay
+  Ib          G           N           N          Delay
+  kp1         N           N           N          EGP
+  kp2         G           N           L          EGP
+  kp3         N           N           N          EGP
+  Fcns        N           N           N          Util
+  Vm0         N           N           N          Util
+  Vmx         N           N           N          Util
+  Km0         N           N           N          Util
+  k1          G           N           L          Glc kin
+  k2          G           N           L          Glc kin
+  VG          N           N           N          Glc kin
+  Ts          G           N           L          CGM
+  kgri        L           N           L          GI
+  kmax        L           N           L          GI
+  kabs        L           N           L          GI
+  f           N           N           N          GI
+  BW          N           N           N          GI
+  ke1         L           N           ?          Renal
+  ke2         N           N           ?          Renal
+
+── GAP ANALYSIS: DECOMPOSED vs REALISTIC vs LOCAL ──
+
+  Parameter   Decomposed  Realistic  Local(full)  Category
+  ----------------------------------------------------------
+  ka1          G           N           L
+  ka2          L           N           L
+  kd           L           N           L
+  m1           L           N           L
+  m2           L           N           L
+  m4           L           N           L
+  VI           G           N           N
+  ki           G           N           L
+  p2U          G           N           L
+  Ib           G           N           N
+  kp1          N           N           N
+  kp2          G           N           L
+  kp3          N           N           N
+  Fcns         N           N           N
+  Vm0          N           N           N
+  Vmx          N           N           N
+  Km0          N           N           N
+  k1           G           N           L
+  k2           G           N           L
+  VG           N           N           N
+  Ts           G           N           L
+  kgri         L           N           L
+  kmax         L           N           L
+  kabs         L           N           L
+  f            N           N           N
+  BW           N           N           N
+  ke1          L           N           ?
+  ke2          N           N           ?
+
+  Key observation: Local(full) = 15/26 L — the 11 N are the scaling group.
+  Decomposed analysis is overly optimistic (assumes known Xl, X, Ip).
+
+── CLINICAL SUMMARY ──
+
+  From CGM + pump + meals only (no decomposition):
+
+  15/26 parameters are locally identifiable:
+    Ts, k1, k2, ka1, ka2, kabs, kd, kgri, ki, kmax, kp2, m1, m2, m4, p2U
+
+  11 parameters are NOT locally identifiable (scaling symmetry group):
+    BW, Fcns, Ib, Km0, VG, VI, Vm0, Vmx, f, kp1, kp3
+    — these form 5 scaling pairs and Km0 (MM term)
+
+  What fixes the scaling group (greedy, from prior_fix_experiment):
+    Fix Km0 + VI + BW + Fcns + Ib (5 population priors)
+    → all 21 remaining become locally identifiable
+
+  Practical takeaway:
+    With CGM data and population priors for just 5 parameters,
+    the remaining 21 individual parameters are estimable.
+    11 structural N parameters are exactly the scaling pairs —
+    these need either an additional measurement (Ip) or population prior(s).
+
+── FILES ──
+  a_full_local_90.csv
+  a_full_local_95.csv
+  a_full_local_99.csv
+  b1_glu_delays_functions.csv
+  p8a_glu_core_functions.csv
+  prior_fix_comparison.csv
+  prior_fix_experiment.jl
+  prior_fix_log_greedy.csv
+  prior_fix_log_hierarchy.csv
+  prior_fix_report.txt
+

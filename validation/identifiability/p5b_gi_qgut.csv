@@ -1,0 +1,7 @@
+variable,result,subsystem
+Qsto1(t),locally,GI alone (y=Qgut)
+Qsto2(t),locally,GI alone (y=Qgut)
+Qgut(t),globally,GI alone (y=Qgut)
+kabs,globally,GI alone (y=Qgut)
+kgri,locally,GI alone (y=Qgut)
+kmax,locally,GI alone (y=Qgut)

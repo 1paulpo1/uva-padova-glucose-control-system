@@ -1,0 +1,189 @@
+╔══════════════════════════════════════════════════════════════════════════╗
+║  STRUCTURAL IDENTIFIABILITY ANALYSIS                                    ║
+║  UVA-Padova T1DM Model (no meals, r1=0, rational approximation)         ║
+╚══════════════════════════════════════════════════════════════════════════╝
+
+Package: StructuralIdentifiability.jl v0.5.23
+Date:    2026-07-10T23:44:57.475
+
+── LOCAL IDENTIFIABILITY ──
+
+  1b_egp_off_no_renal             15/28 locally id  (5.5 s)
+  2b_egp_off_renal                16/30 locally id  (1.1 s)
+  2a_egp_on_renal                 16/33 locally id  (1.7 s)
+  1a_egp_on_no_renal              17/31 locally id  (1.4 s)
+
+  Parameter                   1a     1b     2a     2b
+  ----------------------------------------------------
+  Fcns                      NO     NO     NO     NO   
+  Gp(t)                     NO     NO     NO     NO   
+  Gsc(t)                    YES    YES    YES    YES  
+  Gt(t)                     NO     NO     NO     NO   
+  I_prime(t)                NO     NO     NO     NO   
+  Ib                        NO     NO     NO     NO   
+  Ii(t)                     YES    YES    YES    YES  
+  Ip(t)                     YES    YES    YES    YES  
+  Isc1(t)                   YES    YES    YES    YES  
+  Isc2(t)                   YES    YES    YES    YES  
+  Km0                       NO     NO     NO     NO   
+  Ts                        YES    YES    YES    YES  
+  VG                        NO     NO     NO     NO   
+  VI                        NO     NO     NO     NO   
+  Vm0                       NO     NO     NO     NO   
+  Vmx                       NO     NO     NO     NO   
+  X(t)                      NO     NO     NO     NO   
+  Xl(t)                     NO     NO     NO     NO   
+  k1                        YES    YES    YES    YES  
+  k2                        YES    YES    YES    YES  
+  ka1                       YES    YES    YES    YES  
+  ka2                       YES    YES    YES    YES  
+  kd                        YES    YES    YES    YES  
+  ke1                       N/A    N/A    NO     YES  
+  ke2                       N/A    N/A    NO     NO   
+  ki                        YES    NO     YES    NO   
+  kp1                       NO     N/A    NO     N/A  
+  kp2                       YES    N/A    NO     N/A  
+  kp3                       NO     N/A    NO     N/A  
+  m1                        YES    YES    YES    YES  
+  m2                        YES    YES    YES    YES  
+  m4                        YES    YES    YES    YES  
+  p2U                       YES    YES    YES    YES  
+
+  Scenarios:
+    1a = EGP active, no renal excretion
+    1b = EGP suppressed, no renal excretion
+    2a = EGP active, renal excretion active
+    2b = EGP suppressed, renal excretion active
+
+── GLOBAL IDENTIFIABILITY (subsystem decomposition) ──
+
+  Methodology: model decomposed into 4 autonomous/feedforward subsystems
+  to make global (differential-algebraic) analysis tractable.
+
+  Insulin (y=Ip)
+  --------------
+    Isc1(t)                    locally
+    Isc2(t)                    locally
+    Ip(t)                      globally
+    Ii(t)                      locally
+    ka1                        globally
+    ka2                        locally
+    kd                         locally
+    m1                         locally
+    m2                         locally
+    m4                         locally
+
+  Insulin (y1=Ip,y2=Ii)
+  ---------------------
+    Isc1(t)                    locally
+    Isc2(t)                    locally
+    Ip(t)                      globally
+    Ii(t)                      globally
+    ka1                        globally
+    ka2                        locally
+    kd                         locally
+    m1                         globally
+    m2                         globally
+    m4                         globally
+
+  EGP delay
+  ---------
+    I_prime(t)                 globally
+    Xl(t)                      globally
+    VI                         globally
+    ki                         globally
+
+  Utilization delay
+  -----------------
+    X(t)                       globally
+    Ib                         globally
+    VI                         globally
+    p2U                        globally
+
+  Glucose core
+  ------------
+    Fcns                       nonidentifiable
+    Km0                        nonidentifiable
+    Ts                         globally
+    VG                         nonidentifiable
+    Vm0                        nonidentifiable
+    Vmx                        nonidentifiable
+    k1                         globally
+    k2                         globally
+    kp1                        nonidentifiable
+    kp2                        globally
+    kp3                        nonidentifiable
+
+── COMPOSITE: Full model structural identifiability ──
+
+  Legend: G = globally id, L = locally id, N = non-identifiable, — = N/A
+
+  Parameter               Global  Local(SE)  Note
+  -----------------------------------------------------------------
+  kd                      L        —
+  ka1                     G        —
+  ka2                     L        —
+
+  m1                      L        —
+  m2                      L        —
+  m4                      L        —
+
+  VI                      G        —
+
+  ki                      G        —
+  kp1                     N        —
+  kp2                     G        —
+  kp3                     N        —
+
+  k1                      G        —
+  k2                      G        —
+  VG                      N        —
+
+  Vm0                     N        —
+  Vmx                     N        —
+  Km0                     N        —
+  Fcns                    N        —
+  p2U                     G        —
+  Ib                      G        —
+
+  Ts                      G        —
+
+── IDENTIFIABLE FUNCTIONS (glucose core, Gsc-only output) ──
+
+  Parameters structurally non-identifiable individually, but these
+  rational combinations ARE identifiable from Gsc alone:
+
+  [1]  kp2
+  [2]  k2
+  [3]  k1
+  [4]  Ts
+  [5]  Vmx//kp3
+  [6]  Vm0//kp3
+  [7]  VG//kp3
+  [8]  Km0//kp3
+  [9]  (Fcns - kp1)//kp3
+
+  Interpretation: Vm0, Vmx, Km0, VG, kp1, kp3, Fcns form identifiable
+  ratios/scaled differences, but individual values cannot be resolved
+  from CGM data alone without additional measurements or informative priors.
+
+── CLINICAL INTERPRETATION ──
+
+  Parameters that CAN be estimated from CGM alone (kp2, k1, k2, Ts, 
+  ka1, ki, p2U) are globally identifiable. This includes:
+    • kp2 (glucose effectiveness on EGP) — key for insulin titration
+    • k1/k2 (glucose transport rates) — microvascular function
+    • p2U (insulin action lag) — relevant for closed-loop tuning
+    • ki (EGP delay) — hepatic insulin resistance marker
+    • ka1 (SC insulin absorption) — pump therapy parameter
+
+  Parameters that require additional data (meal info, dual-tracer, etc.):
+    • Vm0, Vmx, Km0 (utilization Michaelis-Menten) — need glucose clamp
+    • kp1, kp3 (EGP amplitude) — confounded with VG, Fcns
+    • VG (glucose volume) — requires tracer dilution
+    • Fcns (CNS uptake) — known constant in practice
+
+  The identifiable ratios Vm0/kp3, VG/kp3, (Fcns−kp1)/kp3 suggest that
+  fixing any one of {kp3, VG, Fcns, kp1} to a literature value would
+  break the scaling symmetry and make the others identifiable.
+

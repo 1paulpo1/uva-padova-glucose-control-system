@@ -1,0 +1,17 @@
+label,iteration,fixed_param,remaining,total_L,newly_L,time_s,N_list
+original,0,-,26,15,0,19.1657655,BW;Fcns;Ib;Km0;VG;VI;Vm0;Vmx;f;kp1;kp3
+original,1,BW,25,15,0,3.8567056,Fcns;Ib;Km0;VG;VI;Vm0;Vmx;f;kp1;kp3
+original,2,f,24,17,2,3.2314113,Fcns;Ib;VI;Vm0;Vmx;kp1;kp3
+original,3,VG,23,16,-1,2.8290601,Fcns;Ib;VI;Vm0;Vmx;kp1;kp3
+original,4,VI,22,18,2,2.5962908,Fcns;Ib;Vm0;kp1
+original,5,Ts,21,17,-1,2.3971661,Fcns;Ib;Vm0;kp1
+original,6,k1,20,16,-1,2.0678215,Fcns;Ib;Vm0;kp1
+original,7,k2,19,15,-1,2.1457662,Fcns;Ib;Vm0;kp1
+original,8,Ib,18,16,1,1.9218372,Fcns;kp1
+original,9,kgri,17,15,-1,1.4668166,Fcns;kp1
+original,10,kmax,16,14,-1,1.5407626,Fcns;kp1
+original,11,kabs,15,13,-1,1.3482462,Fcns;kp1
+original,12,Vm0,14,12,-1,1.2770236,Fcns;kp1
+original,13,Vmx,13,11,-1,1.2657171,Fcns;kp1
+original,14,Km0,12,10,-1,0.9276794,Fcns;kp1
+original,15,kp1,11,11,1,0.7352707,

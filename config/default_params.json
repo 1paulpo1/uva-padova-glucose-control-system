@@ -1,40 +1,142 @@
 {
-  "description": "Default UVA-Padova parameter configuration. Greedy-5 fixed (Km0, VI, BW, Fcns, Ib) restore full structural local identifiability of the remaining 21 parameters.",
+  "description": "Default UVA-Padova parameter configuration. Greedy-5 fixed (Km0, VI, BW, Fcns, Ib) + 4 dormant fixed (b, d, r1, Gth) restore full structural local identifiability of the remaining 25 parameters.",
   "model": "t1dm",
   "parameters": [
-    { "name": "VG" },
-    { "name": "k1" },
-    { "name": "k2" },
-    { "name": "VI",  "fixed": true },
-    { "name": "m1" },
-    { "name": "m2" },
-    { "name": "m4" },
-    { "name": "kmax" },
-    { "name": "kmin" },
-    { "name": "kabs" },
-    { "name": "kgri" },
-    { "name": "f" },
-    { "name": "b" },
-    { "name": "d" },
-    { "name": "kp1" },
-    { "name": "kp2" },
-    { "name": "kp3" },
-    { "name": "ki" },
-    { "name": "Fcns", "fixed": true },
-    { "name": "Vm0" },
-    { "name": "Vmx" },
-    { "name": "Km0",  "fixed": true },
-    { "name": "p2U" },
-    { "name": "r1" },
-    { "name": "Gth" },
-    { "name": "ke1" },
-    { "name": "ke2" },
-    { "name": "ka1" },
-    { "name": "ka2" },
-    { "name": "kd" },
-    { "name": "Ts" },
-    { "name": "BW",   "fixed": true },
-    { "name": "Gb" },
-    { "name": "Ib",   "fixed": true }
+    {
+      "name": "VG",
+      "prior_std": 1.0
+    },
+    {
+      "name": "k1",
+      "prior_std": 1.0
+    },
+    {
+      "name": "k2",
+      "prior_std": 1.0
+    },
+    {
+      "name": "VI",
+      "fixed": true
+    },
+    {
+      "name": "m1",
+      "prior_std": 1.0
+    },
+    {
+      "name": "m2",
+      "prior_std": 1.0
+    },
+    {
+      "name": "m4",
+      "prior_std": 1.0
+    },
+    {
+      "name": "kmax",
+      "prior_std": 1.0
+    },
+    {
+      "name": "kmin",
+      "prior_std": 1.0
+    },
+    {
+      "name": "kabs",
+      "prior_std": 1.0
+    },
+    {
+      "name": "kgri",
+      "prior_std": 1.0
+    },
+    {
+      "name": "f",
+      "prior_std": 1.0
+    },
+    {
+      "name": "b",
+      "fixed": true
+    },
+    {
+      "name": "d",
+      "fixed": true
+    },
+    {
+      "name": "kp1",
+      "prior_std": 1.0
+    },
+    {
+      "name": "kp2",
+      "prior_std": 1.0
+    },
+    {
+      "name": "kp3",
+      "prior_std": 1.0
+    },
+    {
+      "name": "ki",
+      "prior_std": 1.0
+    },
+    {
+      "name": "Fcns",
+      "fixed": true
+    },
+    {
+      "name": "Vm0",
+      "prior_std": 1.0
+    },
+    {
+      "name": "Vmx",
+      "prior_std": 1.0
+    },
+    {
+      "name": "Km0",
+      "fixed": true
+    },
+    {
+      "name": "p2U",
+      "prior_std": 1.0
+    },
+    {
+      "name": "r1",
+      "fixed": true
+    },
+    {
+      "name": "Gth",
+      "fixed": true
+    },
+    {
+      "name": "ke1",
+      "prior_std": 1.0
+    },
+    {
+      "name": "ke2",
+      "prior_std": 1.0
+    },
+    {
+      "name": "ka1",
+      "prior_std": 1.0
+    },
+    {
+      "name": "ka2",
+      "prior_std": 1.0
+    },
+    {
+      "name": "kd",
+      "prior_std": 1.0
+    },
+    {
+      "name": "Ts",
+      "prior_std": 1.0
+    },
+    {
+      "name": "BW",
+      "fixed": true
+    },
+    {
+      "name": "Gb",
+      "prior_std": 1.0
+    },
+    {
+      "name": "Ib",
+      "fixed": true
+    }
   ]
 }

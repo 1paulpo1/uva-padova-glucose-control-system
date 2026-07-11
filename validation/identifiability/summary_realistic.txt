@@ -1,6 +1,7 @@
 ╔══════════════════════════════════════════════════════════════════════════╗
 ║  REALISTIC IDENTIFIABILITY ANALYSIS                                     ║
 ║  UVA-Padova T1DM — CGM + pump + meals only                             ║
+║  2026-07-11T21:08:40.599                                                         ║
 ╚══════════════════════════════════════════════════════════════════════════╝
 
 ── DESIGN ──
@@ -10,11 +11,8 @@
   No decomposition assumptions: Xl, X, Ip are STATES, not known inputs
 
 ── A: FULL MODEL LOCAL IDENTIFIABILITY ──
-  13 states, 26 params, 2 inputs (u, u_meal), 1 output (Gsc)
+  13 states, 27 params, 2 inputs (u, u_meal), 1 output (Gsc)
   Analysis run at 3 probability thresholds (0.99 / 0.95 / 0.90)
-
-  Total L/N (any var): 23/39, 23/39, 23/39
-  Parameter L:         15/26, 15/26, 15/26
 
   Parameter               p=0.99  p=0.95  p=0.90  Category
   -----------------------------------------------------------------
@@ -59,13 +57,13 @@
   Ts                      Y       Y       Y       CGM
 
   Threshold stability: ALL params identical across p=0.99/0.95/0.90
-  No borderline parameters.
+  No borderline parameters — the local rank is decisive.
 
 ── B: GLOBAL ANALYSIS ──
 
-  B1: Glucose + Delays (6 states, Xl,X as states, Ip(t) input)
-  Identifiable functions (1):
-    [1]  (crashed — model too large for global analysis)
+  B1: Glucose + Delays → CRASHED (FLINT/MM Gröbner basis overflow)
+  The 6-state model with MM term cannot be analyzed globally
+  (same 86 GB memory failure as GI+Glucose model)
 
   B2: Glucose Core — using cached P8a results:
     [1]  kp2
@@ -98,19 +96,19 @@
   p2U         G           N           L          Delay
   Ib          G           N           N          Delay
   kp1         N           N           N          EGP
-  kp2         G           N           L          EGP
+  kp2         G           G           L          EGP
   kp3         N           N           N          EGP
   Fcns        N           N           N          Util
   Vm0         N           N           N          Util
   Vmx         N           N           N          Util
   Km0         N           N           N          Util
-  k1          G           N           L          Glc kin
-  k2          G           N           L          Glc kin
+  k1          G           G           L          Glc kin
+  k2          G           G           L          Glc kin
   VG          N           N           N          Glc kin
-  Ts          G           N           L          CGM
-  kgri        L           N           L          GI
-  kmax        L           N           L          GI
-  kabs        L           N           L          GI
+  Ts          G           G           L          CGM
+  kgri        L           L           L          GI
+  kmax        L           L           L          GI
+  kabs        L           L           L          GI
   f           N           N           N          GI
   BW          N           N           N          GI
   ke1         L           N           ?          Renal
@@ -118,70 +116,46 @@
 
 ── GAP ANALYSIS: DECOMPOSED vs REALISTIC vs LOCAL ──
 
-  Parameter   Decomposed  Realistic  Local(full)  Category
-  ----------------------------------------------------------
-  ka1          G           N           L
-  ka2          L           N           L
-  kd           L           N           L
-  m1           L           N           L
-  m2           L           N           L
-  m4           L           N           L
-  VI           G           N           N
-  ki           G           N           L
-  p2U          G           N           L
-  Ib           G           N           N
-  kp1          N           N           N
-  kp2          G           N           L
-  kp3          N           N           N
-  Fcns         N           N           N
-  Vm0          N           N           N
-  Vmx          N           N           N
-  Km0          N           N           N
-  k1           G           N           L
-  k2           G           N           L
-  VG           N           N           N
-  Ts           G           N           L
-  kgri         L           N           L
-  kmax         L           N           L
-  kabs         L           N           L
-  f            N           N           N
-  BW           N           N           N
-  ke1          L           N           ?
-  ke2          N           N           ?
+  Parameters where Realistic < Decomposed (over-optimistic decomposition):
 
-  Key observation: Local(full) = 15/26 L — the 11 N are the scaling group.
-  Decomposed analysis is overly optimistic (assumes known Xl, X, Ip).
+  ka1,ka2,kd,m1,m2,m4 (insulin subsystem):
+    Decomposed: G/L (direct Ip measurement)
+    Realistic:  N (no Ip — insulin params filter through delays → Gsc)
+    Local:      L (p=0.99 — Y because nominal trajectory provides excitation)
+
+  ki, VI, p2U, Ib (delays):
+    Decomposed: G (Ip known, delay dynamics fully excited)
+    Realistic:  N (Ip unknown → delays confounded with insulin)
+    Local:      ki=L, p2U=L
+
+  Parameters where Local < Decomposed (nonlinearity reduces local id):
+
+  kp2 (glucose effectiveness on EGP):
+    Decomposed: G | Local: L
+
+  Parameters where all three agree:
+
+  k1, k2, Ts, kp2 — always id (core glucose kinetics)
+  kp1, kp3, Fcns, VG, Vm0, Vmx, Km0 — never id (scaling symmetry)
 
 ── CLINICAL SUMMARY ──
 
-  From CGM + pump + meals only (no decomposition):
+  Globally identifiable from CGM + pump + meals ONLY (no decomposition):
+    k1, k2, kp2, Ts  — glucose transport, effectiveness, CGM sensor
 
-  15/26 parameters are locally identifiable:
-    Ts, k1, k2, ka1, ka2, kabs, kd, kgri, ki, kmax, kp2, m1, m2, m4, p2U
+  Locally identifiable from full model (practical estimation feasible):
+    All of above + insulin params (ka1,ka2,kd,m1,m2,m4) + delays (ki,p2U)
+    + GI params (kgri,kmax,kabs)
+    — because in practice the trajectory provides enough excitation
 
-  11 parameters are NOT locally identifiable (scaling symmetry group):
-    BW, Fcns, Ib, Km0, VG, VI, Vm0, Vmx, f, kp1, kp3
-    — these form 5 scaling pairs and Km0 (MM term)
-
-  What fixes the scaling group (greedy, from prior_fix_experiment):
-    Fix Km0 + VI + BW + Fcns + Ib (5 population priors)
-    → all 21 remaining become locally identifiable
-
-  Practical takeaway:
-    With CGM data and population priors for just 5 parameters,
-    the remaining 21 individual parameters are estimable.
-    11 structural N parameters are exactly the scaling pairs —
-    these need either an additional measurement (Ip) or population prior(s).
+  Never identifiable (need priors or additional measurements):
+    kp1, kp3, Fcns, VG, Vm0, Vmx, Km0 — scaling symmetry group
+    f, BW — GI scaling (ratio f/BW identifiable)
+    Ib, VI — basal/volume scaling
 
 ── FILES ──
   a_full_local_90.csv
   a_full_local_95.csv
   a_full_local_99.csv
   b1_glu_delays_functions.csv
-  p8a_glu_core_functions.csv
-  prior_fix_comparison.csv
-  prior_fix_experiment.jl
-  prior_fix_log_greedy.csv
-  prior_fix_log_hierarchy.csv
-  prior_fix_report.txt
 

@@ -3,7 +3,7 @@
 //
 // Usage:
 //     ./test_real_data <cgm_csv> <basal_csv> [n_restarts] [cmaes_evals] [mode]
-//     mode: 'config' (default, JSON config — 21 active params, greedy-5 fixed)
+//     mode: 'config' (default, JSON config — 25 active params, greedy-5 + 4 dormant fixed)
 //           '3'     (kp2+Vm0+p2U, legacy), '6' (+ka1+ka2+kd, legacy),
 //           '9'     (+kabs+Gb+VG, legacy)
 //
@@ -37,7 +37,7 @@ int main(int argc, char* argv[]) {
 
   if (argc < 3) {
     std::cerr << "Usage: " << argv[0] << " <cgm_csv> <basal_csv> [n_restarts] [cmaes_evals] [mode]\n";
-    std::cerr << "  mode: 'config' (default, JSON — 21 active, greedy-5 fixed),\n";
+    std::cerr << "  mode: 'config' (default, JSON — 25 active, greedy-5 + 4 dormant fixed),\n";
     std::cerr << "        '3' (kp2+Vm0+p2U), '6' (+ka1+ka2+kd), '9' (+kabs+Gb+VG)\n";
     return 1;
   }

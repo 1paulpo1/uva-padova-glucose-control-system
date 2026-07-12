@@ -223,8 +223,15 @@ auto IdentificationPipeline<CMAES, LM>::run(
 
   for (int restart = 0; restart < n_cmaes_restarts; ++restart) {
     int seed = static_cast<int>(std::random_device{}());
-    auto cmaes_res = CMAES::run(fit_func, initial_sigma, cmaes_evals,
-                                 seed, cmaes_lower, cmaes_upper);
+    typename CMAES::Result cmaes_res;
+    try {
+      cmaes_res = CMAES::run(fit_func, initial_sigma, cmaes_evals,
+                              seed, cmaes_lower, cmaes_upper);
+    } catch (const std::exception& e) {
+      std::cerr << "  CMA-ES restart " << (restart + 1) << "/"
+                << n_cmaes_restarts << " threw: " << e.what() << "\n";
+      cmaes_res = {{}, 1e20, 0};
+    }
 
     if (cmaes_res.best_cost < best_cma_cost) {
       best_cma_cost = cmaes_res.best_cost;
@@ -241,7 +248,7 @@ auto IdentificationPipeline<CMAES, LM>::run(
   auto lm_res = LM::run(best_cma_point, obs_cost, prior_cost, lm_max_iters);
 
   Result result;
-  bool cmaes_failed = (best_cma_cost >= 1e19);
+  bool cmaes_failed = (best_cma_cost >= 1e10);
   bool lm_valid = std::isfinite(lm_res.final_cost) && lm_res.final_cost >= 0;
   if (lm_valid && lm_res.final_cost < best_cma_cost && (cmaes_failed || lm_res.converged)) {
     std::cout << "  LM improved cost: " << lm_res.final_cost
@@ -312,8 +319,11 @@ Params IdentificationPipeline<CMAES, LM>::Result::to_params(
     const std::vector<ParamDescriptor>& desc) const
 {
   Params p = base;
-  for (size_t i = 0; i < params.size() && i < desc.size(); ++i) {
-    double mult = std::exp(params[i]);
+  size_t theta_idx = 0;
+  for (size_t i = 0; i < desc.size(); ++i) {
+    if (desc[i].fixed) continue;
+    if (theta_idx >= params.size()) break;
+    double mult = std::exp(params[theta_idx]);
 
     if (desc[i].name == "kp1")  p.kp1  *= mult;
     if (desc[i].name == "kp2")  p.kp2  *= mult;
@@ -347,6 +357,8 @@ Params IdentificationPipeline<CMAES, LM>::Result::to_params(
     if (desc[i].name == "r1")   p.r1   *= mult;
     if (desc[i].name == "Gth")  p.Gth  *= mult;
     if (desc[i].name == "BW")   p.BW   *= mult;
+
+    ++theta_idx;
   }
   return p;
 }

@@ -3,6 +3,9 @@
 #include <vector>
 #include <cmath>
 #include <random>
+#include <stdexcept>
+#include <filesystem>
+#include <fstream>
 #include <Eigen/Core>
 
 #include "uva_padova/optimizer.hpp"
@@ -26,6 +29,7 @@ struct MockCMAES {
   static inline int param_dim{1};
   static inline int n_evals_per_call{100};
   static inline int call_count{0};
+  static inline int throw_on_call{-1};  // call index that throws std::runtime_error (-1 = never)
 
   static Result run(std::function<double(const double*, int)> /*fit_func*/,
                     const std::vector<double>& /*initial_sigma*/,
@@ -34,6 +38,8 @@ struct MockCMAES {
                     double /*lower_bound*/,
                     double /*upper_bound*/) {
     int i = call_count++;
+    if (throw_on_call >= 0 && i == throw_on_call)
+      throw std::runtime_error("mock cmaes exception");
     std::vector<double> p(param_dim, 0.0);
     if (!params_flat.empty()) {
       for (int j = 0; j < param_dim && j < static_cast<int>(params_flat.size()); ++j)
@@ -49,6 +55,7 @@ struct MockCMAES {
     param_dim = 1;
     n_evals_per_call = 100;
     call_count = 0;
+    throw_on_call = -1;
   }
 };
 
@@ -167,7 +174,7 @@ TEST(PipelineMockTest, to_params_applies_exponential_multipliers) {
   MockLM::reset();
   MockCMAES::param_dim = 2;
   MockCMAES::params_flat = {0.5, -0.2};
-  MockCMAES::costs = {5.0};        // ensure best_cma_cost < 1e19 so best_cma_point updates
+  MockCMAES::costs = {5.0};        // ensure best_cma_cost < 1e10 so best_cma_point updates
 
   auto data = make_id_data({10.0, 20.0});
   std::vector<ParamDescriptor> desc = {{"kp1", 0, 1}, {"kp2", 0, 1}};
@@ -199,6 +206,121 @@ TEST(PipelineMockTest, lm_not_used_when_not_converged) {
 
   EXPECT_TRUE(result.success);
   EXPECT_DOUBLE_EQ(result.cost, 8.0);  // CMA best, not LM
+}
+
+TEST(PipelineMockTest, all_cmaes_costs_exceed_threshold) {
+  MockCMAES::reset();
+  MockLM::reset();
+  MockCMAES::param_dim = 1;
+  MockCMAES::costs = {5e10, 5e10, 5e10};
+  MockLM::next_cost = 5e10;
+
+  auto data = make_id_data({10.0});
+  std::vector<ParamDescriptor> desc = {{"kp1", 0, 1}};
+
+  auto result = IdentificationPipeline<MockCMAES, MockLM>::run(
+      data, Params::defaults_t1d(), desc, 3, 100);
+
+  EXPECT_FALSE(result.success);
+  EXPECT_GE(result.cost, 5e10);
+}
+
+TEST(PipelineMockTest, exception_in_cmaes_restart) {
+  MockCMAES::reset();
+  MockLM::reset();
+  MockCMAES::param_dim = 1;
+  MockCMAES::costs = {1e20, 5.0, 5.0};
+  MockCMAES::throw_on_call = 0;  // first call throws
+  MockLM::next_cost = 0.1;
+
+  auto data = make_id_data({10.0});
+  std::vector<ParamDescriptor> desc = {{"kp1", 0, 1}};
+
+  auto result = IdentificationPipeline<MockCMAES, MockLM>::run(
+      data, Params::defaults_t1d(), desc, 3, 100);
+
+  EXPECT_TRUE(result.success);
+  ASSERT_EQ(result.all_restarts.size(), 3);
+  EXPECT_DOUBLE_EQ(result.all_restarts[0].cost, 1e20);
+  EXPECT_DOUBLE_EQ(result.all_restarts[1].cost, 5.0);
+  EXPECT_DOUBLE_EQ(result.all_restarts[2].cost, 5.0);
+  EXPECT_DOUBLE_EQ(result.cost, 0.1);
+}
+
+TEST(PipelineMockTest, to_params_skips_fixed_descriptors) {
+  MockCMAES::reset();
+  MockLM::reset();
+  MockCMAES::param_dim = 2;
+  MockCMAES::params_flat = {0.5, -0.2};
+  MockCMAES::costs = {5.0};
+
+  auto data = make_id_data({10.0, 20.0});
+  std::vector<ParamDescriptor> active_desc = {{"kp1", 0, 1}, {"kp2", 0, 1}};
+  std::vector<ParamDescriptor> full_desc = {
+      {"kp1", 0, 1},
+      {"kp2", 0, 1},
+      {"VI", 0, 1, 1.0, true}  // fixed
+  };
+
+  auto result = IdentificationPipeline<MockCMAES, MockLM>::run(
+      data, Params::defaults_t1d(), active_desc, 1, 100);
+
+  Params base = Params::defaults_t1d();
+  Params recovered = result.to_params(base, full_desc);
+
+  EXPECT_NEAR(recovered.kp1, base.kp1 * std::exp(0.5), 1e-12);
+  EXPECT_NEAR(recovered.kp2, base.kp2 * std::exp(-0.2), 1e-12);
+  EXPECT_DOUBLE_EQ(recovered.VI, base.VI);
+}
+
+TEST(PipelineMockTest, all_restarts_recorded_even_bad) {
+  MockCMAES::reset();
+  MockLM::reset();
+  MockCMAES::param_dim = 1;
+  MockCMAES::costs = {1e20, 5.0, 1e20};
+  MockLM::next_cost = 5.0;
+
+  auto data = make_id_data({10.0});
+  std::vector<ParamDescriptor> desc = {{"kp1", 0, 1}};
+
+  auto result = IdentificationPipeline<MockCMAES, MockLM>::run(
+      data, Params::defaults_t1d(), desc, 3, 100);
+
+  ASSERT_EQ(result.all_restarts.size(), 3);
+  EXPECT_DOUBLE_EQ(result.all_restarts[0].cost, 1e20);
+  EXPECT_DOUBLE_EQ(result.all_restarts[1].cost, 5.0);
+  EXPECT_DOUBLE_EQ(result.all_restarts[2].cost, 1e20);
+}
+
+TEST(PipelineMockTest, run_from_config_corrupted_json) {
+  auto tmp = std::filesystem::temp_directory_path() / "bad_config.json";
+  {
+    std::ofstream ofs(tmp.string());
+    ofs << "{broken";
+  }
+
+  auto data = make_id_data({10.0});
+  auto result = IdentificationPipeline<>::run_from_config(
+      data, Params::defaults_t1d(), tmp.string(), 1, 100);
+
+  EXPECT_FALSE(result.success);
+  std::filesystem::remove(tmp);
+}
+
+TEST(PipelineMockTest, run_from_config_minimal_json) {
+  auto tmp = std::filesystem::temp_directory_path() / "min_config.json";
+  {
+    std::ofstream ofs(tmp.string());
+    ofs << R"({"parameters": [{"name": "kp1"}]})";
+  }
+
+  auto data = make_id_data({10.0, 20.0, 30.0});
+  auto result = IdentificationPipeline<>::run_from_config(
+      data, Params::defaults_t1d(), tmp.string(), 3, 100);
+
+  // Config loaded successfully and pipeline executed (may or may not converge)
+  ASSERT_GE(result.all_restarts.size(), 1);
+  std::filesystem::remove(tmp);
 }
 
 // ===========================================================================

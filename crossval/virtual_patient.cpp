@@ -1,10 +1,7 @@
 #include "virtual_patient.hpp"
 
 #include "uva_padova/config_loader.hpp"
-#include "uva_padova/odesystem.hpp"
-#include "uva_padova/integrals.hpp"
-#include "uva_padova/delivery.hpp"
-#include "uva_padova/constants.hpp"
+#include "uva_padova/synthetic_data_generator.hpp"
 
 #include <random>
 #include <cmath>
@@ -102,12 +99,7 @@ VirtualPatientResult generate_virtual_patient(
   result.true_params = apply_theta_to_params(
       result.base_params, result.active_desc, result.theta_true);
 
-  // ---- 6. Find steady state for true params ----
-  State ss;
-  double insulin_ss = SteadyStateSolver::find(ss, result.true_params,
-                                               result.true_params.Gb);
-
-  // ---- 7. Build TRUE meal/bolus schedule ----
+  // ---- 6. Build TRUE meal/bolus schedule ----
   struct MealEvent { int t_min; double cho_mg; };
   struct BolusEvent { int t_min; double dose_pmol_kg; };
 
@@ -127,164 +119,31 @@ VirtualPatientResult generate_virtual_patient(
     }
   }
 
-  // ---- 8. Generate REPORTED meals with errors ----
-  // reported meals may differ from true meals in timing, amount, or be skipped
-  struct ReportedMeal { int t_min; double cho_mg; bool skipped; };
-  std::vector<ReportedMeal> reported_meals;
-  std::vector<int> true_to_reported_idx; // maps true meal index -> reported index (-1 if skipped)
+  // ---- 8. Generate synthetic data via shared generator ----
+  // The generator handles: forward simulation (via simulate_observations),
+  // heteroskedastic CGM noise, dropouts, meal errors, and building both
+  // clean and noisy IdentificationData.
+  SyntheticDataConfig gen_cfg;
+  gen_cfg.duration_min = config.duration_min;
+  gen_cfg.cgm_interval = config.cgm_interval;
+  gen_cfg.noise_sd = config.cgm_noise.fixed_sd;
+  gen_cfg.seed = rng_seed + 1;  // +1 to avoid overlap with theta generation RNG
+  gen_cfg.relative_sd = config.cgm_noise.relative_sd;
+  gen_cfg.dropout_prob = config.cgm_noise.dropout_prob;
+  gen_cfg.max_dropout_min = config.cgm_noise.max_dropout_min;
+  gen_cfg.meal_skip_prob = config.meal_errors.skip_prob;
+  gen_cfg.meal_timing_shift_sd = config.meal_errors.timing_shift_sd;
+  gen_cfg.meal_amount_noise_sd = config.meal_errors.amount_noise_sd;
 
-  std::normal_distribution<double> timing_shift(0.0, config.meal_errors.timing_shift_sd);
-  std::normal_distribution<double> amount_noise(0.0, config.meal_errors.amount_noise_sd);
-  std::uniform_real_distribution<double> uniform01(0.0, 1.0);
+  for (const auto& m : true_meals)
+    gen_cfg.meals.emplace_back(static_cast<double>(m.t_min), m.cho_mg);
+  for (const auto& b : true_boluses)
+    gen_cfg.boluses.emplace_back(static_cast<double>(b.t_min), b.dose_pmol_kg);
 
-  true_to_reported_idx.reserve(true_meals.size());
-  for (const auto& tm : true_meals) {
-    // Skip?
-    if (config.meal_errors.skip_prob > 0.0 && uniform01(rng) < config.meal_errors.skip_prob) {
-      true_to_reported_idx.push_back(-1);
-      continue;
-    }
-
-    // Timing shift, rounded to nearest minute
-    int shift_min = static_cast<int>(std::round(timing_shift(rng)));
-    int reported_t = std::max(0, tm.t_min + shift_min);
-
-    // Amount noise (multiplicative, clamped to >= 0)
-    double noise_factor = 1.0 + amount_noise(rng);
-    if (noise_factor < 0.0) noise_factor = 0.0;
-    double reported_cho = tm.cho_mg * noise_factor;
-
-    true_to_reported_idx.push_back(static_cast<int>(reported_meals.size()));
-    reported_meals.push_back({reported_t, reported_cho, false});
-  }
-
-  // ---- 9. Forward simulation ----
-  // We simulate once, recording TRUE CGM and building NOISY CGM simultaneously.
-  State x = ss;
-  BasicInputs<double> u;
-  u.insulin_rate = insulin_ss;
-
-  // True (noiseless) CGM record
-  std::vector<double> clean_cgm_time, clean_cgm_value;
-
-  // Noisy CGM record (with noise + dropouts)
-  std::vector<double> noisy_cgm_time, noisy_cgm_value;
-
-  // Bolus record (same for both)
-  std::vector<double> bolus_time_vec, bolus_dose_vec;
-
-  // CGM dropout state
-  bool dropout_active = false;
-  int dropout_remaining = 0;
-
-  std::normal_distribution<double> cgm_noise_unit(0.0, 1.0);
-
-  // Convert dropout duration from minutes to CGM observation intervals
-  int max_dropout_obs = config.cgm_noise.max_dropout_min / config.cgm_interval;
-  if (max_dropout_obs < 1) max_dropout_obs = 1;
-  std::uniform_int_distribution<int> dropout_duration_dist(1, max_dropout_obs);
-
-  int meal_idx = 0, bolus_idx = 0;
-
-  for (int t = 0; t <= config.duration_min; ++t) {
-    // Apply TRUE meal events (physiological reality)
-    while (meal_idx < static_cast<int>(true_meals.size()) && true_meals[meal_idx].t_min == t) {
-      x.Qsto1 += true_meals[meal_idx].cho_mg;
-      x.mealD = true_meals[meal_idx].cho_mg;
-      meal_idx++;
-    }
-
-    // Apply TRUE bolus events
-    while (bolus_idx < static_cast<int>(true_boluses.size()) && true_boluses[bolus_idx].t_min == t) {
-      x.Isc1 += true_boluses[bolus_idx].dose_pmol_kg;
-      bolus_time_vec.push_back(static_cast<double>(t));
-      bolus_dose_vec.push_back(true_boluses[bolus_idx].dose_pmol_kg);
-      bolus_idx++;
-    }
-
-    // Record CGM at specified interval
-    if (t % config.cgm_interval == 0) {
-      double true_gsc = x.Gsc;
-
-      // Clean CGM (noiseless)
-      clean_cgm_time.push_back(static_cast<double>(t));
-      clean_cgm_value.push_back(true_gsc);
-
-      // Noisy CGM with dropouts
-      noisy_cgm_time.push_back(static_cast<double>(t));
-
-      // Start a new dropout if not in one
-      if (!dropout_active &&
-          config.cgm_noise.max_dropout_min > 0 &&
-          config.cgm_noise.dropout_prob > 0.0 &&
-          uniform01(rng) < config.cgm_noise.dropout_prob) {
-        dropout_active = true;
-        dropout_remaining = dropout_duration_dist(rng);
-      }
-
-      if (dropout_active && dropout_remaining > 0) {
-        // Convention: 0 = missing CGM
-        noisy_cgm_value.push_back(0.0);
-        dropout_remaining--;
-        if (dropout_remaining <= 0) {
-          dropout_active = false;
-        }
-      } else {
-        // Heteroskedastic noise: σ_total = sqrt(σ_fixed² + (σ_rel · Gsc / 100)²)
-        double sigma_fixed = config.cgm_noise.fixed_sd;
-        double sigma_rel = (config.cgm_noise.relative_sd / 100.0) * true_gsc;
-        double sigma = std::sqrt(sigma_fixed * sigma_fixed + sigma_rel * sigma_rel);
-        double obs = true_gsc + cgm_noise_unit(rng) * sigma;
-        if (obs <= 0.0) obs = 0.1;  // avoid confusion with dropout flag
-        noisy_cgm_value.push_back(obs);
-      }
-    }
-
-    // RK4 step
-    if (t < config.duration_min) {
-      RK4Integrator::step(UvaPadovaODESystem{}, x, u, result.true_params, 1.0);
-    }
-  }
-
-  // ---- 10. Build CLEAN IdentificationData (noiseless CGM, true meals) ----
-  {
-    IdentificationData clean;
-    clean.cgm_time = clean_cgm_time;
-    clean.cgm_value = clean_cgm_value;
-    for (const auto& m : true_meals) {
-      clean.meal_time.push_back(static_cast<double>(m.t_min));
-      clean.meal_cho.push_back(m.cho_mg);
-    }
-    clean.bolus_time = bolus_time_vec;
-    clean.bolus_dose = bolus_dose_vec;
-    clean.finalize();
-    result.true_data = std::move(clean);
-  }
-
-  // ---- 11. Build NOISY IdentificationData (noisy CGM, reported meals) ----
-  {
-    IdentificationData noisy;
-    // CGM: skip values that are 0 (missing/dropout convention)
-    for (size_t i = 0; i < noisy_cgm_time.size(); ++i) {
-      if (noisy_cgm_value[i] > 0.0) {
-        noisy.cgm_time.push_back(noisy_cgm_time[i]);
-        noisy.cgm_value.push_back(noisy_cgm_value[i]);
-      }
-    }
-
-    // Meals: use reported meals
-    for (const auto& rm : reported_meals) {
-      noisy.meal_time.push_back(static_cast<double>(rm.t_min));
-      noisy.meal_cho.push_back(rm.cho_mg);
-    }
-
-    // Boluses: same as true (pump records accurate delivery)
-    noisy.bolus_time = bolus_time_vec;
-    noisy.bolus_dose = bolus_dose_vec;
-
-    noisy.finalize();
-    result.data = std::move(noisy);
-  }
+  auto gen_result = generate_synthetic_data(
+      result.true_params, result.base_params, result.active_desc, gen_cfg);
+  result.true_data = std::move(gen_result.true_data);
+  result.data = std::move(gen_result.data);
 
   return result;
 }

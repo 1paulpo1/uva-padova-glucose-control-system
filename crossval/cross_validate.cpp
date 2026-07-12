@@ -74,29 +74,6 @@ static double get_param_value(const Params& p, const std::string& name) {
 }
 
 // ===========================================================================
-// Filter zero-valued CGM observations (dropout convention: 0 = missing)
-// ===========================================================================
-static IdentificationData filter_cgm_zeros(const IdentificationData& src) {
-  IdentificationData out = src;
-  out.cgm_time.clear();
-  out.cgm_value.clear();
-  out.meal_time = src.meal_time;
-  out.meal_cho = src.meal_cho;
-  out.insulin_time = src.insulin_time;
-  out.insulin_rate = src.insulin_rate;
-  out.bolus_time = src.bolus_time;
-  out.bolus_dose = src.bolus_dose;
-  for (size_t i = 0; i < src.cgm_time.size(); ++i) {
-    if (src.cgm_value[i] > 1e-6) {
-      out.cgm_time.push_back(src.cgm_time[i]);
-      out.cgm_value.push_back(src.cgm_value[i]);
-    }
-  }
-  out.finalize();
-  return out;
-}
-
-// ===========================================================================
 // CSV writing
 // ===========================================================================
 static void write_csv_header(std::ofstream& csv, const std::vector<ParamDescriptor>& desc) {
@@ -566,8 +543,8 @@ int main(int argc, char** argv) {
         d.prior_std = prior_std;
     }
 
-    // 2. Filter dropout zeros from data
-    auto id_data = filter_cgm_zeros(vp.data);
+    // 2. Data (dropouts already filtered by generator)
+    auto& id_data = vp.data;
 
     // 3. Run identification
     std::cout << "  Identifying (" << id_data.cgm_time.size()

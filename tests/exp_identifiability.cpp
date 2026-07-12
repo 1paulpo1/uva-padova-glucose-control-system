@@ -20,92 +20,11 @@
 #include <sstream>
 #include <fstream>
 
-#include "uva_padova/types.hpp"
-#include "uva_padova/odesystem.hpp"
-#include "uva_padova/integrals.hpp"
-#include "uva_padova/delivery.hpp"
-#include "uva_padova/cost_function.hpp"
 #include "uva_padova/optimizer.hpp"
 #include "uva_padova/constants.hpp"
+#include "uva_padova/synthetic_data_generator.hpp"
 
 using namespace uva_padova;
-
-// ---------------------------------------------------------------------------
-// Synthetic data generator (shared with test_identification.cpp)
-// ---------------------------------------------------------------------------
-static IdentificationData generate_synthetic_data(const Params& true_params,
-                                                  int duration_min,
-                                                  double noise_sd,
-                                                  int seed = 42,
-                                                  bool with_bolus = false)
-{
-  State ss;
-  double insulin_ss = SteadyStateSolver::find(ss, true_params, true_params.Gb);
-
-  struct Meal { int t; double cho_mg; };
-  std::vector<Meal> meals = {
-    { 60, 60000 }, { 360, 80000 }, { 600, 70000 },
-  };
-
-  struct Bolus { int t; double dose_pmol_per_kg; };
-  std::vector<Bolus> boluses;
-  if (with_bolus) {
-    double bw = true_params.BW;
-    boluses = {
-      {60,  6.0 * constants::kInsulinUnits_To_Pmol / bw},
-      {360, 8.0 * constants::kInsulinUnits_To_Pmol / bw},
-      {600, 7.0 * constants::kInsulinUnits_To_Pmol / bw},
-    };
-  }
-
-  State x = ss;
-  BasicInputs<double> u;
-  u.insulin_rate = insulin_ss;
-
-  std::vector<double> cgm_time, cgm_value;
-  std::vector<double> bolus_time_vec, bolus_dose_vec;
-  std::mt19937 rng(seed);
-  std::normal_distribution<double> noise(0.0, noise_sd);
-
-  int meal_idx = 0;
-  for (int t = 0; t <= duration_min; ++t) {
-    if (meal_idx < (int)meals.size() && meals[meal_idx].t == t) {
-      x.Qsto1 += meals[meal_idx].cho_mg;
-      x.mealD = meals[meal_idx].cho_mg;
-      meal_idx++;
-    }
-    // Bolus injection into Isc1 (SC compartment, natural PK handles absorption)
-    for (auto& b : boluses) {
-      if (b.t == t) {
-        x.Isc1 += b.dose_pmol_per_kg;
-        bolus_time_vec.push_back((double)b.t);
-        bolus_dose_vec.push_back(b.dose_pmol_per_kg);
-      }
-    }
-    if (t % 5 == 0) {
-      cgm_time.push_back((double)t);
-      cgm_value.push_back(x.Gsc + noise(rng));
-    }
-    if (t < duration_min)
-      RK4Integrator::step(UvaPadovaODESystem{}, x, u, true_params, 1.0);
-  }
-
-  IdentificationData data;
-  data.cgm_time  = cgm_time;
-  data.cgm_value = cgm_value;
-  data.meal_time.clear();
-  data.meal_cho.clear();
-  for (auto& m : meals) {
-    data.meal_time.push_back((double)m.t);
-    data.meal_cho.push_back(m.cho_mg);
-  }
-  data.insulin_time.clear();
-  data.insulin_rate.clear();
-  data.bolus_time  = bolus_time_vec;
-  data.bolus_dose  = bolus_dose_vec;
-  data.finalize();
-  return data;
-}
 
 // ---------------------------------------------------------------------------
 // Experiment configuration
@@ -145,9 +64,23 @@ static TrialResult run_trial(const Params& true_p,
 {
   Params base_p = Params::defaults_t1d();
 
-  double noise_sd = 3.0;
-  auto data = generate_synthetic_data(true_p, config.duration_min, noise_sd,
-                                       seed, config.with_bolus);
+  SyntheticDataConfig gen_cfg;
+  gen_cfg.duration_min = config.duration_min;
+  gen_cfg.cgm_interval = 5;
+  gen_cfg.noise_sd = 3.0;
+  gen_cfg.seed = seed;
+  gen_cfg.meals = {{60, 60000}, {360, 80000}, {600, 70000}};
+  if (config.with_bolus) {
+    double bw = true_p.BW;
+    gen_cfg.boluses = {
+      {60,  6.0 * constants::kInsulinUnits_To_Pmol / bw},
+      {360, 8.0 * constants::kInsulinUnits_To_Pmol / bw},
+      {600, 7.0 * constants::kInsulinUnits_To_Pmol / bw},
+    };
+  }
+
+  auto gen_result = generate_synthetic_data(true_p, base_p, desc, gen_cfg);
+  auto& data = gen_result.data;
 
   CoutSilencer _silence;
   auto result = IdentificationPipeline<>::run(data, base_p, desc, 3, 500);
@@ -231,11 +164,18 @@ int main() {
       auto tr = run_trial(true_p, cfg, seed, desc);
 
       // Get n_obs from a quick data generation (only for CSV, not counted in trials)
-      auto data = generate_synthetic_data(true_p, cfg.duration_min, 3.0, seed, cfg.with_bolus);
+      SyntheticDataConfig tmp_cfg;
+      tmp_cfg.duration_min = cfg.duration_min;
+      tmp_cfg.cgm_interval = 5;
+      tmp_cfg.noise_sd = 3.0;
+      tmp_cfg.seed = seed;
+      tmp_cfg.meals = {{60, 60000}, {360, 80000}, {600, 70000}};
+      auto tmp_gen = generate_synthetic_data(true_p, Params::defaults_t1d(), desc, tmp_cfg);
+      auto& tmp_data = tmp_gen.data;
 
       std::cout << cfg.label << ","
                 << seed << ","
-                << data.cgm_time.size() << ","
+                << tmp_data.cgm_time.size() << ","
                 << tr.rel_err_kp2 << ","
                 << tr.rel_err_Vm0 << ","
                 << tr.rel_err_p2U << ","
@@ -247,7 +187,7 @@ int main() {
       errs_Vm0.push_back(tr.rel_err_Vm0);
       errs_p2U.push_back(tr.rel_err_p2U);
       corrs.push_back(tr.corr_Vm0_p2U);
-      n_obs_vec.push_back(static_cast<int>(data.cgm_time.size()));
+      n_obs_vec.push_back(static_cast<int>(tmp_data.cgm_time.size()));
     }
 
     auto mean = [](const std::vector<double>& v) {

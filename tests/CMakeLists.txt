@@ -48,7 +48,7 @@ target_link_options(test_odesystem PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
 add_executable(test_identification integration/identification_pipeline_test.cpp)
 target_link_libraries(test_identification PRIVATE uva_padova_id GTest::gtest GTest::gtest_main)
-target_include_directories(test_identification PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/tests)
+target_include_directories(test_identification PRIVATE ${CMAKE_SOURCE_DIR}/include)
 target_link_options(test_identification PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
 gtest_discover_tests(test_odesystem)
@@ -61,3 +61,15 @@ target_include_directories(exp_identifiability PRIVATE ${CMAKE_SOURCE_DIR}/inclu
 add_executable(debug_fim debug_fim.cpp)
 target_link_libraries(debug_fim PRIVATE uva_padova_id)
 target_include_directories(debug_fim PRIVATE ${CMAKE_SOURCE_DIR}/include)
+
+# ===========================================================================
+# Recovery benchmark tests
+# ===========================================================================
+add_executable(test_recovery
+  recovery/recovery_benchmark_test.cpp
+)
+target_link_libraries(test_recovery PRIVATE uva_padova_id GTest::gtest GTest::gtest_main)
+target_include_directories(test_recovery PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_options(test_recovery PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
+
+gtest_discover_tests(test_recovery)

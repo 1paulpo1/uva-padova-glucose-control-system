@@ -1,7 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "uva_padova/optimizer.hpp"
-#include "test_data/synthetic_data_generator.hpp"
+#include "uva_padova/synthetic_data_generator.hpp"
 
 using namespace uva_padova;
 
@@ -26,8 +26,9 @@ TEST(IdentificationPipeline, synthetic_data_recovery) {
     {"p2U", 0.0, 1.0, 0.0},
   };
 
-  IdentificationData data = generate_synthetic_data(
+  auto gen_result = generate_synthetic_data(
       true_p, Params::defaults_t1d(), desc, cfg);
+  IdentificationData& data = gen_result.data;
   ASSERT_GT(data.cgm_time.size(), 0);
 
   auto result = IdentificationPipeline<>::run(

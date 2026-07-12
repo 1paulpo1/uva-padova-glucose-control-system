@@ -56,12 +56,13 @@ struct ParamDescriptor {
 };
 
 // ---------------------------------------------------------------------------
-// Observation cost — returns sqrt(2·log(cosh(r))) · sign(r) residuals for LM.
+// Observation cost — returns plain standardized residuals for LM.
+// Robustness is handled by ceres::SoftLOneLoss passed in AddResidualBlock.
 //
 //   r = (G_sim − G_obs) / σ
-//   residual = sign(r) · √(2·log(cosh(r)))
+//   residual = r
 //
-// Then ½·Σ residual² = Σ log(cosh(r))  — exact log-cosh robust cost.
+// Ceres minimizes Σ 2·(√(1+r²) − 1) via SoftLOneLoss.
 //
 // Parameter vector θ lives in LOG-space:
 //   true_value = base_value · exp(θᵢ)
@@ -93,21 +94,7 @@ struct ObservationCost : ceres::CostFunction {
     mutable_parameter_block_sizes()->push_back(n_params_);
   }
 
-  // ---- sqrt-trick: sign(r) · √(2·log(cosh(r))) ----
-  // Numerically: log(cosh(r)) = |r| + log1p(exp(-2|r|)) - ln(2)
-  template<typename T>
-  static T robust_logcosh_sqrt(const T& r) {
-    using std::abs; using std::exp; using std::log1p; using std::sqrt;
-    double ra = extract_val(r);
-    if (std::abs(ra) < 1e-6) {
-      return r;  // linear regime: √(2·log(cosh(r))) ↔ r
-    }
-    T absr = abs(r);
-    T logcosh = absr + log1p(exp(T(-2) * absr)) - T(M_LN2);
-    return (absr / r) * sqrt(T(2) * logcosh);
-  }
-
-  // ---- LM interface (sqrt-trick residuals) ----
+  // ---- LM interface (plain residuals, SoftLOneLoss via Ceres) ----
   bool Evaluate(const double* const* parameters, double* residuals,
                 double** jacobians) const override {
     eval_count_++;
@@ -123,27 +110,26 @@ struct ObservationCost : ceres::CostFunction {
       auto cgm = simulate_observations<JetT>(jet_params);
       for (int i = 0; i < n_obs_; ++i) {
         JetT r = (cgm[i] - JetT(data_.cgm_value[i])) / JetT(sigma_);
-        JetT s = robust_logcosh_sqrt(r);
-        residuals[i] = extract_val(s);
+        residuals[i] = extract_val(r);
         if (!std::isfinite(residuals[i])) return false;
         for (int j = 0; j < n_params_; ++j)
-          jacobians[0][i * n_params_ + j] = extract_deriv(s, j);
+          jacobians[0][i * n_params_ + j] = extract_deriv(r, j);
       }
     } else {
       auto cgm = simulate_observations<double>(params);
       for (int i = 0; i < n_obs_; ++i) {
         double r = (cgm[i] - data_.cgm_value[i]) / sigma_;
-        residuals[i] = robust_logcosh_sqrt(r);
+        residuals[i] = r;
         if (!std::isfinite(residuals[i])) return false;
       }
     }
     return true;
   }
 
-  // ---- Raw residuals + Jacobian (no sqrt-trick) for sandwich ----
-  // One ODE integration with Jet AD. Returns r_i = (G_sim - G_obs) / σ
-  // and J_raw[i,j] = ∂r_i/∂θ_j.
-  // Returns false if any residual is non-finite (simulation produced NaN).
+  // ---- Raw residuals + Jacobian (retained for reference/diagnostics) ----
+  // Returns r_i = (G_sim - G_obs) / σ and J_raw[i,j] = ∂r_i/∂θ_j.
+  // NOTE: with plain residuals in Evaluate(), this is now equivalent
+  // to Evaluate() — kept for backward compatibility and diagnostics (Gate C).
   bool compute_raw_gradients(const double* params,
                              std::vector<double>& raw_residuals,
                              Eigen::MatrixXd& J_raw) const {
@@ -167,16 +153,16 @@ struct ObservationCost : ceres::CostFunction {
     return true;
   }
 
-  // ---- Scalar cost with log-cosh (for CMA-ES) ----
-  // Returns Σ log(cosh(r_i))  — matches Ceres ½·Σ residual² with sqrt-trick.
+  // ---- Scalar cost (matches Ceres SoftLOneLoss) ----
+  // Returns Σ 2·(√(1+r²) − 1)  — matches Ceres ½·Σ residual² with SoftLOneLoss.
   double compute_scalar_cost(const double* params) const {
-    using std::log; using std::cosh;
+    using std::sqrt;
     eval_count_++;
     double total = 0.0;
     auto cgm = simulate_observations<double>(params);
     for (int i = 0; i < n_obs_; ++i) {
-      double resid = (cgm[i] - data_.cgm_value[i]) / sigma_;
-      double term = log(cosh(resid));
+      double r = (cgm[i] - data_.cgm_value[i]) / sigma_;
+      double term = 2.0 * (std::sqrt(1.0 + r * r) - 1.0);
       if (!std::isfinite(term)) return 1e20;
       total += term;
     }

@@ -71,12 +71,10 @@ LMOptimizer::Result LMOptimizer::run(
   problem_options.cost_function_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
   ceres::Problem problem(problem_options);
 
-  // Observation residuals — log-cosh robustness is embedded in residuals
-  // via sqrt-trick: residual = sign(r)·√(2·log(cosh(r))), r = (G-obs)/σ
-  // so ½·Σ s² = Σ log(cosh(r)) without needing a separate LossFunction.
-  problem.AddResidualBlock(&obs_cost, nullptr, x.data());
+  // Observation residuals — plain (G-obs)/σ, robustness via SoftLOneLoss.
+  problem.AddResidualBlock(&obs_cost, new ceres::SoftLOneLoss(1.0), x.data());
 
-  // MAP prior residuals (quadratic)
+  // MAP prior residuals (quadratic, no loss function)
   problem.AddResidualBlock(&prior_cost, nullptr, x.data());
 
   // Parameter bounds (θ ∈ [-3, 3] in log-space)
@@ -100,27 +98,40 @@ LMOptimizer::Result LMOptimizer::run(
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
 
-  std::cout << "  LM: " << summary.BriefReport() << "\n";
+  // ---- Posterior covariance via Ceres (auto-mode, loss-weighted) ----
+  ceres::Covariance::Options cov_options;
+  cov_options.apply_loss_function = true;
+  ceres::Covariance covariance(cov_options);
 
-  // ---- Posterior covariance at final LM point ----
-  std::cout << "  [LM covariance] theta = [";
-  for (int i = 0; i < obs_cost.n_params_; ++i) std::cout << (i ? " " : "") << x[i];
-  std::cout << "]\n";
-  auto cov_res = compute_covariance_at(x, obs_cost, prior_cost);
+  Eigen::MatrixXd cov_matrix;
+  {
+    int dim = obs_cost.n_params_;
+    std::vector<std::pair<const double*, const double*>> cov_blocks;
+    cov_blocks.push_back({x.data(), x.data()});
+    if (covariance.Compute(cov_blocks, &problem)) {
+      cov_matrix.resize(dim, dim);
+      covariance.GetCovarianceBlock(x.data(), x.data(), cov_matrix.data());
+    } else {
+      cov_matrix = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
+    }
+  }
+
+  std::cout << "  LM: " << summary.BriefReport() << "\n";
 
   Result res;
   res.final_params = x;
   res.n_iters      = static_cast<int>(summary.iterations.size());
   res.converged    = summary.termination_type == ceres::CONVERGENCE;
   res.final_cost   = summary.final_cost;
-  res.cov          = std::move(cov_res.cov);
-  res.cov_sandwich = std::move(cov_res.cov_sandwich);
+  res.cov          = std::move(cov_matrix);
+  // cov_sandwich retained for reference; unused in auto-mode
 
   return res;
 }
 
 // ---------------------------------------------------------------------------
 // Covariance + sandwich computation at arbitrary theta
+// RETAINED FOR REFERENCE — unused in auto-mode (Ceres Covariance used instead)
 // ---------------------------------------------------------------------------
 LMOptimizer::CovarianceResult LMOptimizer::compute_covariance_at(
     const std::vector<double>& theta,
@@ -307,13 +318,34 @@ IdentificationPipeline::Result IdentificationPipeline::run(
   result.total_evals = obs_cost.eval_count();
   result.all_restarts = std::move(restart_points);
 
-  // Always compute covariance at the chosen params, regardless of branch
-  std::cout << "  [pipeline covariance] theta = [";
-  for (int i = 0; i < dim; ++i) std::cout << (i ? " " : "") << result.params[i];
-  std::cout << "]\n";
-  auto cov_res = LMOptimizer::compute_covariance_at(result.params, obs_cost, prior_cost);
-  result.cov          = std::move(cov_res.cov);
-  result.cov_sandwich = std::move(cov_res.cov_sandwich);
+  // Covariance at chosen params — Ceres auto-mode (loss-weighted)
+  if (result.success && !result.params.empty()) {
+    int dim = obs_cost.n_params_;
+    if (lm_res.cov.rows() == dim && result.params == lm_res.final_params) {
+      // LM was used: reuse its Ceres-computed covariance
+      result.cov = lm_res.cov;
+    } else {
+      // CMA-ES-only or fallback: build temporary Ceres problem for covariance
+      ceres::Problem tmp_problem;
+      tmp_problem.AddResidualBlock(&obs_cost, new ceres::SoftLOneLoss(1.0),
+                                   result.params.data());
+      tmp_problem.AddResidualBlock(&prior_cost, nullptr, result.params.data());
+
+      ceres::Covariance::Options cov_opts;
+      ceres::Covariance tmp_cov(cov_opts);
+      std::vector<std::pair<const double*, const double*>> cb = {
+          {result.params.data(), result.params.data()}};
+
+      Eigen::MatrixXd cov_mat = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
+      if (tmp_cov.Compute(cb, &tmp_problem)) {
+        cov_mat.resize(dim, dim);
+        tmp_cov.GetCovarianceBlock(result.params.data(), result.params.data(),
+                                    cov_mat.data());
+      }
+      result.cov = std::move(cov_mat);
+    }
+  }
+  result.cov_sandwich = Eigen::MatrixXd{};  // unused in auto-mode
 
   return result;
 }

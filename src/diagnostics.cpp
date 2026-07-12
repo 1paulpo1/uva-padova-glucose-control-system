@@ -390,12 +390,8 @@ GateCResult diagnose_observability(
   // 1. Compute raw (normalised) Jacobian J_r at theta,
   //    where r_i = (G_sim_i - G_obs_i) / σ.
   //
-  //    NOTE: we use compute_raw_gradients (the physical residual), NOT
-  //    Evaluate (the sqrt-trick residual fed to Ceres).  Gate (c) must
-  //    reflect sensitivity of the physical mismatch, not its numerical
-  //    reformulation.  Consequently the eigenvalues printed here differ
-  //    from the sqrt-trick singular values shown in the "Direct Jacobian"
-  //    section of debug_fim.cpp — this is intentional, not a bug.
+  //    We use compute_raw_gradients (retained for diagnostics); with plain
+  //    residuals in Evaluate() both methods return the same Jacobian.
   std::vector<double> raw_resid;
   Eigen::MatrixXd J_raw;
   bool ok = obs_cost.compute_raw_gradients(theta, raw_resid, J_raw);

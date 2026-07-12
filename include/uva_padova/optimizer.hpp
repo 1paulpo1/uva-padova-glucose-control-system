@@ -31,8 +31,8 @@ struct LMOptimizer {
     double final_cost{1e20};
     int n_iters{0};
     bool converged{false};
-    Eigen::MatrixXd cov;           // naive posterior covariance (J^T J)^{-1}
-    Eigen::MatrixXd cov_sandwich;  // robust sandwich covariance H^{-1} V H^{-1}
+    Eigen::MatrixXd cov;           // posterior covariance via Ceres (loss-weighted)
+    Eigen::MatrixXd cov_sandwich;  // retained for reference; unused in auto-mode
   };
 
   struct CovarianceResult {
@@ -45,9 +45,7 @@ struct LMOptimizer {
                     PriorCost& prior_cost,
                     int max_iters = 100);
 
-  // Evaluate covariance + sandwich covariance at an arbitrary theta
-  // (not necessarily the LM convergence point). Used by IdentificationPipeline
-  // to always report cov consistent with the chosen params.
+  // Retained for reference — unused in auto-mode (Ceres Covariance used instead)
   static CovarianceResult compute_covariance_at(
       const std::vector<double>& theta,
       ObservationCost& obs_cost,
@@ -68,8 +66,8 @@ struct IdentificationPipeline {
     double cost{1e20};
     int total_evals{0};
     bool success{false};
-    Eigen::MatrixXd cov;           // posterior covariance from LM refinement
-    Eigen::MatrixXd cov_sandwich;  // robust sandwich covariance
+    Eigen::MatrixXd cov;           // posterior covariance from Ceres (loss-weighted)
+    Eigen::MatrixXd cov_sandwich;  // retained for reference; unused in auto-mode
     std::vector<RestartRecord> all_restarts;  // best point from each CMA-ES restart
 
     Params to_params(const Params& base,

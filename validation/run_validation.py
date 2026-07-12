@@ -202,7 +202,7 @@ def check_csv_quality(cgm_csv: str, basal_csv: str) -> dict:
                 result["total_min"] = t
     with open(basal_csv, newline="") as f:
         result["basal_segments"] = sum(1 for _ in csv.DictReader(f))
-    result["has_data"] = result["cgm_count"] > 0
+    result["has_data"] = result["cgm_count"] > 0 and result["basal_segments"] >= 2
     result["cgm_density"] = result["cgm_count"] / max(1, result["total_min"] / 5)
     return result
 

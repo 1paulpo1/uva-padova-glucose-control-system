@@ -164,7 +164,16 @@ LMOptimizer::CovarianceResult LMOptimizer::compute_covariance_at(
   // cov_sandwich = H⁻¹ · V · H⁻¹
   std::vector<double> raw_resid;
   Eigen::MatrixXd J_raw;
-  obs_cost.compute_raw_gradients(theta.data(), raw_resid, J_raw);
+  bool ok = obs_cost.compute_raw_gradients(theta.data(), raw_resid, J_raw);
+
+  CovarianceResult result;
+  if (!ok) {
+    std::cerr << "  [sandwich] compute_raw_gradients failed (NaN in simulation); "
+              << "returning prior-only covariance\n";
+    result.cov = cov;
+    result.cov_sandwich = cov;
+    return result;
+  }
 
   Eigen::MatrixXd H = Eigen::MatrixXd::Zero(n_params, n_params);
   Eigen::MatrixXd V = Eigen::MatrixXd::Zero(n_params, n_params);
@@ -188,7 +197,6 @@ LMOptimizer::CovarianceResult LMOptimizer::compute_covariance_at(
   Eigen::MatrixXd H_inv  = H_reg.inverse();
   Eigen::MatrixXd cov_sandwich = H_inv * V * H_inv;
 
-  CovarianceResult result;
   result.cov          = std::move(cov);
   result.cov_sandwich = std::move(cov_sandwich);
   return result;

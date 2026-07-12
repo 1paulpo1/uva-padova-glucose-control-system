@@ -89,6 +89,16 @@ IdentificationData RealDataReader::load_from_csv(
     return data;
   }
 
+  // Degenerate profile: a single basal segment cannot be encoded as step
+  // changes (no return to baseline), which leads to unphysiological insulin
+  // drift and NaN in ODE simulation.  Bail out — caller must handle empty
+  // insulin data (steady-state-only fallback).
+  if (basal_segments.size() < 2) {
+    std::cerr << "Warning: degenerate basal profile (1 segment), "
+              << "returning empty insulin data\n";
+    return data;
+  }
+
   // ---- Step-change basal encoding ----
   // Compute steady-state insulin rate for the default params
   State ss_state;

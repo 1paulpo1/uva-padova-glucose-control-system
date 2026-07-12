@@ -469,7 +469,20 @@ GateCResult diagnose_observability(
   //    section of debug_fim.cpp — this is intentional, not a bug.
   std::vector<double> raw_resid;
   Eigen::MatrixXd J_raw;
-  obs_cost.compute_raw_gradients(theta, raw_resid, J_raw);
+  bool ok = obs_cost.compute_raw_gradients(theta, raw_resid, J_raw);
+  if (!ok) {
+    std::cerr << "  [GateC] compute_raw_gradients failed (NaN in simulation)"
+              << " — marking all params as prior-dominated\n";
+    gate.param_labels.reserve(n_params);
+    gate.prior_dominated.assign(n_params, true);
+    gate.max_eigenvalue = 0.0;
+    gate.condition_number = 0.0;
+    for (int i = 0; i < n_params; ++i) {
+      gate.param_labels.push_back(desc[i].name);
+      gate.eigenvalues.push_back(0.0);
+    }
+    return gate;
+  }
 
   // 2. FIM_obs = J_raw^T J_raw  (normalised observed Fisher Information)
   Eigen::MatrixXd FIM = (J_raw.transpose() * J_raw).eval();

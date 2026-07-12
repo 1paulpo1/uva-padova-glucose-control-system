@@ -125,6 +125,7 @@ struct ObservationCost : ceres::CostFunction {
         JetT r = (cgm[i] - JetT(data_.cgm_value[i])) / JetT(sigma_);
         JetT s = robust_logcosh_sqrt(r);
         residuals[i] = extract_val(s);
+        if (!std::isfinite(residuals[i])) return false;
         for (int j = 0; j < n_params_; ++j)
           jacobians[0][i * n_params_ + j] = extract_deriv(s, j);
       }
@@ -133,6 +134,7 @@ struct ObservationCost : ceres::CostFunction {
       for (int i = 0; i < n_obs_; ++i) {
         double r = (cgm[i] - data_.cgm_value[i]) / sigma_;
         residuals[i] = robust_logcosh_sqrt(r);
+        if (!std::isfinite(residuals[i])) return false;
       }
     }
     return true;
@@ -141,7 +143,8 @@ struct ObservationCost : ceres::CostFunction {
   // ---- Raw residuals + Jacobian (no sqrt-trick) for sandwich ----
   // One ODE integration with Jet AD. Returns r_i = (G_sim - G_obs) / σ
   // and J_raw[i,j] = ∂r_i/∂θ_j.
-  void compute_raw_gradients(const double* params,
+  // Returns false if any residual is non-finite (simulation produced NaN).
+  bool compute_raw_gradients(const double* params,
                              std::vector<double>& raw_residuals,
                              Eigen::MatrixXd& J_raw) const {
     eval_count_++;
@@ -157,9 +160,11 @@ struct ObservationCost : ceres::CostFunction {
     for (int i = 0; i < n_obs_; ++i) {
       JetT r = (cgm[i] - JetT(data_.cgm_value[i])) / JetT(sigma_);
       raw_residuals[i] = extract_val(r);
+      if (!std::isfinite(raw_residuals[i])) return false;
       for (int j = 0; j < n_params_; ++j)
         J_raw(i, j) = extract_deriv(r, j);
     }
+    return true;
   }
 
   // ---- Scalar cost with log-cosh (for CMA-ES) ----

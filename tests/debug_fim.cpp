@@ -352,7 +352,11 @@ int main() {
   // Get raw residuals (r_i, not sqrt-transformed) and their Jacobian
   std::vector<double> raw_resid;
   Eigen::MatrixXd J_raw;
-  obs_cost.compute_raw_gradients(theta, raw_resid, J_raw);
+  bool ok = obs_cost.compute_raw_gradients(theta, raw_resid, J_raw);
+  if (!ok) {
+    std::cout << "  [debug sandwich] compute_raw_gradients failed (NaN)\n";
+    return 0;
+  }
 
   Eigen::MatrixXd Hs = Eigen::MatrixXd::Zero(n_params, n_params);
   Eigen::MatrixXd Vs = Eigen::MatrixXd::Zero(n_params, n_params);

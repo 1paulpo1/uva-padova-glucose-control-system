@@ -210,7 +210,7 @@ int main(int argc, char* argv[]) {
   // ---- Gate (b) ----
   {
     Params base_p = base_params;
-    ObservationCost obs_cost(data, base_p, active_desc);
+    ObservationCost<> obs_cost(data, base_p, active_desc);
 
     auto gate_b = diagnose_structural_adequacy(
         data.cgm_time, data.cgm_value, data.meal_time,
@@ -237,7 +237,7 @@ int main(int argc, char* argv[]) {
   // ---- Gate (c) ----
   {
     Params base_p = base_params;
-    ObservationCost obs_cost(data, base_p, active_desc);
+    ObservationCost<> obs_cost(data, base_p, active_desc);
 
     auto gate_c = diagnose_observability(
         result.params.data(), obs_cost, active_desc);

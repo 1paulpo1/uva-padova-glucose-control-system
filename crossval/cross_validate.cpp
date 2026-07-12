@@ -587,6 +587,7 @@ int main(int argc, char** argv) {
           lm_max_iters, cmaes_lower, cmaes_upper);
     }
 
+    std::cout << "  [debug] pipeline returned\n";
     std::cout << "  Result: success=" << (ires.success ? "YES" : "NO")
               << " cost=" << ires.cost
               << " evals=" << ires.total_evals << "\n";
@@ -596,25 +597,31 @@ int main(int argc, char** argv) {
     if (ires.success)
       gateA = diagnose_multiplicity(ires.all_restarts, vp.active_desc);
     if (gateA.passed) n_gateA_passed++;
+    std::cout << "  [debug] Gate A done\n";
 
     // 5. Gate B
     GateBResult gateB;
     if (ires.success) {
-      ObservationCost obs_cost(id_data, vp.base_params, vp.active_desc);
+      ObservationCost<> obs_cost(id_data, vp.base_params, vp.active_desc);
+      std::cout << "  [debug] Gate B starting...\n";
       gateB = diagnose_structural_adequacy(
           id_data.cgm_time, id_data.cgm_value, id_data.meal_time,
           ires.params.data(), obs_cost);
+      std::cout << "  [debug] Gate B done\n";
     }
     if (gateB.passed) n_gateB_passed++;
 
     // 6. Gate C
     GateCResult gateC;
     if (ires.success) {
-      ObservationCost obs_cost_gc(id_data, vp.base_params, vp.active_desc);
+      ObservationCost<> obs_cost_gc(id_data, vp.base_params, vp.active_desc);
+      std::cout << "  [debug] Gate C starting...\n";
       gateC = diagnose_observability(ires.params.data(), obs_cost_gc, vp.active_desc);
+      std::cout << "  [debug] Gate C done\n";
     }
 
     // 7. Recovery metrics
+    std::cout << "  [debug] computing recovery metrics...\n";
     std::vector<double> abs_err(vp.active_desc.size(), std::numeric_limits<double>::quiet_NaN());
     std::vector<double> abs_err_phys(vp.active_desc.size(), std::numeric_limits<double>::quiet_NaN());
     Params recovered_params;
@@ -632,6 +639,7 @@ int main(int argc, char** argv) {
       }
       n_success++;
     }
+    std::cout << "  [debug] recovery metrics done\n";
 
     // Print gate summary
     std::cout << "  Gates: A=" << (gateA.passed ? "PASS" : "FAIL")

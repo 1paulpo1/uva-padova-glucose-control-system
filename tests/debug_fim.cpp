@@ -170,7 +170,7 @@ int main() {
   // ---- Gate (b): structural adequacy ----
   {
     Params base_p = Params::defaults_t1d();
-    ObservationCost obs_cost(data, base_p, desc);
+    ObservationCost<> obs_cost(data, base_p, desc);
     PriorCost prior_cost(desc);
 
     auto gate_b = diagnose_structural_adequacy(
@@ -199,7 +199,7 @@ int main() {
   // ---- Gate (c): observability (SVD/FIM) ----
   {
     Params base_p = Params::defaults_t1d();
-    ObservationCost obs_cost(data, base_p, desc);
+    ObservationCost<> obs_cost(data, base_p, desc);
 
     auto gate_c = diagnose_observability(
         result.params.data(), obs_cost, desc);
@@ -221,7 +221,7 @@ int main() {
   // Now rebuild the Jacobian ourselves for diagnostics
   std::cout << "\n=== Direct Jacobian evaluation at final params ===\n";
   Params base_p = Params::defaults_t1d();
-  ObservationCost obs_cost(data, base_p, desc);
+  ObservationCost<> obs_cost(data, base_p, desc);
   PriorCost prior_cost(desc);
 
   int n_obs = obs_cost.n_obs_;
@@ -315,7 +315,7 @@ int main() {
 
   auto compare_jobs_at_zero = [&](bool with_bolus) {
     auto d = generate_data(true_p, 42, with_bolus);
-    ObservationCost oc(d, base_p, desc);
+    ObservationCost<> oc(d, base_p, desc);
     int no = oc.n_obs_, np = oc.n_params_;
     std::vector<double> zero_theta(np, 0.0);
     const double* zt = zero_theta.data();

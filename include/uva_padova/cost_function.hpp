@@ -12,10 +12,7 @@
 #include <ceres/cost_function.h>
 
 #include "uva_padova/types.hpp"
-#include "uva_padova/odesystem.hpp"
-#include "uva_padova/integrals.hpp"
-#include "uva_padova/delivery.hpp"
-#include "uva_padova/constants.hpp"
+#include "uva_padova/simulator.hpp"
 
 namespace uva_padova {
 
@@ -67,6 +64,7 @@ struct ParamDescriptor {
 // Parameter vector θ lives in LOG-space:
 //   true_value = base_value · exp(θᵢ)
 // ---------------------------------------------------------------------------
+template <typename Simulator = UvaPadovaSimulator>
 struct ObservationCost : ceres::CostFunction {
   static constexpr int kMaxJetDim = 30;
   using JetT = ceres::Jet<double, kMaxJetDim>;
@@ -181,7 +179,7 @@ struct ObservationCost : ceres::CostFunction {
     // Steady state
     BasicParams<double> p_double = to_double(p);
     State ss_state;
-    double insulin_ss = SteadyStateSolver::find(ss_state, p_double, p_double.Gb);
+    double insulin_ss = Simulator::find_steady_state(ss_state, p_double, p_double.Gb);
 
     // Convert SS to T with sensitivities
     BasicState<T> state;
@@ -212,7 +210,7 @@ struct ObservationCost : ceres::CostFunction {
         apply_adjustments(theta_double, p_pert);
 
         State ss_pert;
-        double i_ss_pert = SteadyStateSolver::find(ss_pert, p_pert, p_pert.Gb);
+        double i_ss_pert = Simulator::find_steady_state(ss_pert, p_pert, p_pert.Gb);
 
         double inv_eps = 1.0 / eps;
         for (int j = 0; j < BasicState<T>::kSize; ++j)
@@ -286,7 +284,7 @@ struct ObservationCost : ceres::CostFunction {
 
       // RK4 step
       if (t < data_.total_min())
-        RK4Integrator::step(UvaPadovaODESystem{}, state, u, p, 1.0);
+        Simulator::step(state, u, p, 1.0);
     }
 
     return cgm_out;

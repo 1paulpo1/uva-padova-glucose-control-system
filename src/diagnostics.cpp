@@ -210,7 +210,7 @@ GateBResult diagnose_structural_adequacy(
     const std::vector<double>& cgm_value,
     const std::vector<double>& meal_time,
     const double* theta,
-    const ObservationCost& obs_cost,
+    const ObservationCost<>& obs_cost,
     double bias_threshold_mgdl,
     double bias_threshold_pct)
 {
@@ -310,7 +310,7 @@ GateBResult diagnose_structural_adequacy(
 // ===========================================================================
 GateCResult diagnose_observability(
     const double* theta,
-    ObservationCost& obs_cost,
+    ObservationCost<>& obs_cost,
     const std::vector<ParamDescriptor>& desc,
     double weak_threshold)
 {

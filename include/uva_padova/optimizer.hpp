@@ -16,7 +16,7 @@ struct CMAESOptimizer {
     int n_evals{0};
   };
 
-  static Result run(const ObservationCost& cost,
+  static Result run(const ObservationCost<>& cost,
                     const std::vector<double>& initial_sigma,
                     int max_evals = 1000,
                     int seed = -1);
@@ -41,14 +41,14 @@ struct LMOptimizer {
   };
 
   static Result run(const std::vector<double>& initial_params,
-                    ObservationCost& obs_cost,
+                    ObservationCost<>& obs_cost,
                     PriorCost& prior_cost,
                     int max_iters = 100);
 
   // Retained for reference — unused in auto-mode (Ceres Covariance used instead)
   static CovarianceResult compute_covariance_at(
       const std::vector<double>& theta,
-      ObservationCost& obs_cost,
+      ObservationCost<>& obs_cost,
       PriorCost& prior_cost);
 };
 

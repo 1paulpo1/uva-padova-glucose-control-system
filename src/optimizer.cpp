@@ -17,7 +17,7 @@ namespace uva_padova {
 // CMA-ES wrapper
 // ===========================================================================
 CMAESOptimizer::Result CMAESOptimizer::run(
-    const ObservationCost& obs_cost,
+    const ObservationCost<>& obs_cost,
     const std::vector<double>& initial_sigma,
     int max_evals,
     int seed)
@@ -60,7 +60,7 @@ CMAESOptimizer::Result CMAESOptimizer::run(
 // ===========================================================================
 LMOptimizer::Result LMOptimizer::run(
     const std::vector<double>& initial_params,
-    ObservationCost& obs_cost,
+    ObservationCost<>& obs_cost,
     PriorCost& prior_cost,
     int max_iters)
 {
@@ -135,7 +135,7 @@ LMOptimizer::Result LMOptimizer::run(
 // ---------------------------------------------------------------------------
 LMOptimizer::CovarianceResult LMOptimizer::compute_covariance_at(
     const std::vector<double>& theta,
-    ObservationCost& obs_cost,
+    ObservationCost<>& obs_cost,
     PriorCost& prior_cost)
 {
   const int n_obs = obs_cost.n_obs_;
@@ -234,7 +234,7 @@ IdentificationPipeline::Result IdentificationPipeline::run(
   int dim = static_cast<int>(param_desc.size());
 
   // Build cost functions
-  ObservationCost obs_cost(data, base_params, param_desc);
+  ObservationCost<> obs_cost(data, base_params, param_desc);
   PriorCost prior_cost(param_desc);
 
   // Compute initial sigma from prior std
@@ -349,6 +349,7 @@ IdentificationPipeline::Result IdentificationPipeline::run(
       }
       result.cov = std::move(cov_mat);
     }
+    std::cout << "  [debug] covariance done\n";
   }
   result.cov_sandwich = Eigen::MatrixXd{};  // unused in auto-mode
 

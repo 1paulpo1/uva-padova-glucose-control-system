@@ -154,17 +154,18 @@ def scan_patients(parquet_path: str, study: str | None, limit: int | None = None
 
 
 def quick_check_window(parquet_path: str, patient_id: str, n_days: int,
-                       min_meals: int, min_boluses: int) -> tuple[bool, int, int]:
+                       min_meals: int, min_boluses: int,
+                       min_cgm_points: int = 50) -> tuple[bool, int, int, int]:
     try:
         t = pq.read_table(
             parquet_path,
-            columns=["id", "date", "carbs", "bolus"],
+            columns=["id", "date", "carbs", "bolus", "CGM"],
             filters=[("id", "=", patient_id)],
         )
     except Exception:
-        return (False, 0, 0)
+        return (False, 0, 0, 0)
     if len(t) == 0:
-        return (False, 0, 0)
+        return (False, 0, 0, 0)
     df = t.to_pandas()
     df["date"] = df["date"].dt.tz_localize(None)
     df = df.sort_values("date").reset_index(drop=True)
@@ -174,7 +175,9 @@ def quick_check_window(parquet_path: str, patient_id: str, n_days: int,
     window = df[(df["t_min"] >= 0) & (df["t_min"] < t_end)]
     meals = int((window["carbs"].fillna(0) > 0).sum())
     boluses = int((window["bolus"].fillna(0) > 0).sum())
-    return (meals >= min_meals and boluses >= min_boluses, meals, boluses)
+    cgm_count = int(window["CGM"].notna().sum())
+    return (meals >= min_meals and boluses >= min_boluses and cgm_count >= min_cgm_points,
+            meals, boluses, cgm_count)
 
 
 def check_csv_quality(cgm_csv: str, basal_csv: str) -> dict:
@@ -378,7 +381,10 @@ def parse_stdout(stdout: str) -> dict:
     # Infer gate_b.passed if not explicitly set
     if "gate_b" in result and "passed" not in result["gate_b"]:
         has_fail = ("failed_description" in result.get("gate_b", {}))
-        result["gate_b"]["passed"] = not has_fail
+        # Also check Ljung-Box: if residual autocorrelation is significant, gate fails
+        gb = result["gate_b"]
+        lb_significant = gb.get("significant", False)
+        result["gate_b"]["passed"] = not has_fail and not lb_significant
 
     return result
 
@@ -407,7 +413,7 @@ def run_patient(test_real_path: str, cgm_csv: str, basal_csv: str,
 
     parsed["exit_code"] = proc.returncode
     parsed["wall_time_s"] = round(wall, 2)
-    parsed["stdout_tail"] = proc.stdout[-500:] if len(proc.stdout) > 500 else proc.stdout
+    parsed["stdout_tail"] = proc.stdout[-2000:] if len(proc.stdout) > 2000 else proc.stdout
 
     # Sanity checks
     cost = parsed.get("cost")
@@ -432,8 +438,13 @@ def evaluate_batch(patients_batch: list, thresholds: dict) -> tuple[bool, str | 
     if n == 0:
         return (False, None)
 
-    n_crash = sum(1 for p in patients_batch if p.get("error"))
-    n_ok = n - n_crash
+    n_err = sum(1 for p in patients_batch if p.get("error"))
+    # SKIP (no CGM data) is not a crash — it's a data quality filter reject
+    n_skip = sum(1 for p in patients_batch
+                 if p.get("error", "").startswith("no CGM")
+                 or p.get("error", "").startswith("CGM density"))
+    n_crash = n_err - n_skip
+    n_ok = n - n_err
     n_gate_a_fail = sum(1 for p in patients_batch
                         if not p.get("error") and not p.get("gate_a", {}).get("passed", False))
     n_gate_b_fail = sum(1 for p in patients_batch
@@ -443,10 +454,12 @@ def evaluate_batch(patients_batch: list, thresholds: dict) -> tuple[bool, str | 
                  and p.get("gate_a", {}).get("passed", False)
                  and p.get("gate_b", {}).get("passed", False))
 
-    crash_rate = n_crash / n
+    # Crash rate only counts real crashes (not SKIPs)
+    crash_denom = n - n_skip
+    crash_rate = n_crash / max(1, crash_denom)
     if crash_rate > thresholds.get("crash", 0.5):
-        return (True, f"Crash rate {crash_rate:.0%} > {thresholds['crash']:.0%} ({n_crash}/{n})")
-    if n_ok == 0:
+        return (True, f"Crash rate {crash_rate:.0%} > {thresholds['crash']:.0%} ({n_crash}/{crash_denom})")
+    if n_ok == 0 and n_crash > 0:
         return (True, f"All {n} patients crashed")
 
     rate_a = n_gate_a_fail / n_ok
@@ -495,6 +508,10 @@ def print_dashboard(patients_batch: list, batch_idx: int, batch_size: int,
     if n == 0:
         return
     n_err = sum(1 for p in patients_batch if p.get("error"))
+    n_skip = sum(1 for p in patients_batch
+                 if p.get("error", "").startswith("no CGM")
+                 or p.get("error", "").startswith("CGM density"))
+    n_crash = n_err - n_skip
     n_ok = n - n_err
     n_gate_a = sum(1 for p in patients_batch
                    if not p.get("error") and p.get("gate_a", {}).get("passed", False))
@@ -527,8 +544,9 @@ def print_dashboard(patients_batch: list, batch_idx: int, batch_size: int,
         print(f"  Overall:     {n_pass}/{n_ok} ({n_pass/n_ok:.0%})"
               f"{'  x min ' + str(thresholds['pass_rate_min']*100) + '%' if n_pass/n_ok < thresholds['pass_rate_min'] else ''}")
     else:
-        print(f"  All {n_err} patients crashed -- no pipeline results")
-    print(f"  Crashes:     {n_err}")
+        print(f"  All {n_err} patients failed -- no pipeline results")
+    print(f"  Skipped:     {n_skip}")
+    print(f"  Crashes:     {n_crash}")
     if conds:
         print(f"  Condition #: min={min(conds):.1e}  median={sorted(conds)[len(conds)//2]:.1e}  max={max(conds):.1e}")
     if costs:
@@ -663,13 +681,14 @@ def main():
     # Window check
     print(f"  Checking N-day windows...")
     eligible = []
+    min_cgm_points = max(1, int(args.days * 288 * args.min_cgm_density))
     for pid, w_lbs in candidates:
-        passes, meals_w, boluses_w = quick_check_window(
-            args.parquet, pid, args.days, args.min_meals, args.min_boluses)
+        passes, meals_w, boluses_w, cgm_w = quick_check_window(
+            args.parquet, pid, args.days, args.min_meals, args.min_boluses, min_cgm_points)
         if passes:
             eligible.append((pid, w_lbs))
-    print(f"  Eligible (meals>={args.min_meals}, bolus>={args.min_boluses} "
-          f"in {args.days}d): {len(eligible)} patients")
+    print(f"  Eligible (meals>={args.min_meals}, bolus>={args.min_boluses}, "
+          f"cgm>={min_cgm_points} in {args.days}d): {len(eligible)} patients")
 
     # Shuffle for diversity
     import random

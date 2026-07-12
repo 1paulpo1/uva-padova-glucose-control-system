@@ -4,6 +4,7 @@
 #include "uva_padova/optimizer.hpp"
 #include "uva_padova/config_loader.hpp"
 
+#include <cmath>
 #include <iostream>
 #include <random>
 
@@ -240,7 +241,9 @@ IdentificationPipeline::Result IdentificationPipeline::run(
       for (int i = 0; i < n; ++i)
         if (x[i] < lbounds[i] || x[i] > ubounds[i])
           return 1e20;
-      return obs_cost.compute_scalar_cost(x) + prior_cost.compute_scalar_prior(x);
+      double fval = obs_cost.compute_scalar_cost(x) + prior_cost.compute_scalar_prior(x);
+      if (!std::isfinite(fval)) return 1e20;
+      return fval;
     };
 
     // Run CMA-ES
@@ -269,15 +272,21 @@ IdentificationPipeline::Result IdentificationPipeline::run(
 
   // Aggregate results
   Result result;
-  // If CMA-ES found nothing (default 1e20), accept any finite LM result.
-  // Otherwise only accept LM if it improved and converged.
+  // If CMA-ES found nothing (default 1e20), accept LM only if it improved
+  // AND produced a valid finite cost.
   bool cmaes_failed = (best_cma_cost >= 1e19);
-  if (lm_res.final_cost < best_cma_cost && (cmaes_failed || lm_res.converged)) {
+  bool lm_valid = std::isfinite(lm_res.final_cost) && lm_res.final_cost >= 0;
+  if (lm_valid && lm_res.final_cost < best_cma_cost && (cmaes_failed || lm_res.converged)) {
     std::cout << "  LM improved cost: " << lm_res.final_cost
               << " (iters=" << lm_res.n_iters << ")\n";
     result.params  = lm_res.final_params;
     result.cost    = lm_res.final_cost;
     result.success = true;
+  } else if (cmaes_failed) {
+    std::cout << "  CMA-ES and LM both failed; marking as failure\n";
+    result.params  = best_cma_point;
+    result.cost    = best_cma_cost;
+    result.success = false;
   } else {
     std::cout << "  LM did not improve; using CMA-ES best point\n";
     result.params  = best_cma_point;

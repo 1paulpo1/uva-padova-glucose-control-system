@@ -170,7 +170,9 @@ struct ObservationCost : ceres::CostFunction {
     auto cgm = simulate_observations<double>(params);
     for (int i = 0; i < n_obs_; ++i) {
       double resid = (cgm[i] - data_.cgm_value[i]) / sigma_;
-      total += log(cosh(resid));
+      double term = log(cosh(resid));
+      if (!std::isfinite(term)) return 1e20;
+      total += term;
     }
     return total;
   }

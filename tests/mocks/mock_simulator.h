@@ -1,6 +1,8 @@
 #pragma once
 
 #include <functional>
+#include <vector>
+#include <utility>
 
 #include "uva_padova/types.hpp"
 #include "uva_padova/cost_function.hpp"
@@ -20,6 +22,7 @@ struct MockSimulator {
   static inline double (*step_delta)(const BasicParams<double>&) = nullptr;
   static inline std::function<void(const BasicState<double>&,
                                     const BasicInputs<double>&)> step_observer;
+  static inline std::vector<std::pair<int,int>> event_log;
 
   static void reset() {
     ss_state = State{};
@@ -28,6 +31,14 @@ struct MockSimulator {
     step_delta = nullptr;
     step_observer = std::function<void(const BasicState<double>&,
                                         const BasicInputs<double>&)>{};
+    event_log.clear();
+  }
+
+  template<int EventType, typename T>
+  static void notify(const BasicState<T>&, const BasicInputs<T>&, T t) {
+    if constexpr (std::is_same_v<T, double>) {
+      event_log.push_back({EventType, static_cast<int>(t)});
+    }
   }
 
   static double find_steady_state(State& out,
@@ -73,6 +84,9 @@ struct LinearMockSimulator {
                    const BasicParams<T>& p, double dt) {
     state.Gsc += T(dt) * p.kp1;
   }
+
+  template<int EventType, typename T>
+  static void notify(const BasicState<T>&, const BasicInputs<T>&, T) {}
 };
 
 } // namespace uva_padova

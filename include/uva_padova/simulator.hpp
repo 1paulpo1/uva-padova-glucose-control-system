@@ -33,6 +33,9 @@ struct UvaPadovaSimulator {
                    double dt) {
     RK4Integrator::step(UvaPadovaODESystem{}, state, u, p, dt);
   }
+
+  template<int EventType, typename T>
+  static void notify(const BasicState<T>&, const BasicInputs<T>&, T) {}
 };
 
 } // namespace uva_padova

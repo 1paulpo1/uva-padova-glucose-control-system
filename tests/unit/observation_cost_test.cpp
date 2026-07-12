@@ -437,3 +437,103 @@ TEST(ObservationCostTest, simulate_with_bolus_events) {
   for (int i = 15; i < 20; ++i)
     EXPECT_NEAR(observed_isc1[i], 200.0, 1e-10) << "t=" << i;
 }
+
+// ---------------------------------------------------------------------------
+//  Simultaneous insulin, bolus, and meal at the same time step.
+//  Verifies event_log order and aggregate state after all three.
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, simulate_simultaneous_events) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::basal_insulin = 1.0;
+
+  // All three events at t=15
+  auto data = make_id_data({0.0, 30.0},
+                           {15.0}, {50000.0},
+                           {15.0}, {2.0},
+                           {15.0}, {100.0});
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> obs_rate, obs_isc1, obs_qsto1;
+  MockSimulator::step_observer =
+      [&](const BasicState<double>& s, const BasicInputs<double>& u) {
+        obs_rate.push_back(u.insulin_rate);
+        obs_isc1.push_back(s.Isc1);
+        obs_qsto1.push_back(s.Qsto1);
+      };
+
+  std::vector<double> theta = {0.0};
+  auto cgm = cost.simulate_observations<double>(theta.data());
+
+  // --- event_log: all three fired, in order, at t=15 ---
+  ASSERT_EQ(MockSimulator::event_log.size(), 3);
+  EXPECT_EQ(MockSimulator::event_log[0], std::pair(0, 15));
+  EXPECT_EQ(MockSimulator::event_log[1], std::pair(1, 15));
+  EXPECT_EQ(MockSimulator::event_log[2], std::pair(2, 15));
+
+  // --- step_observer: 30 steps (t=0..29) ---
+  ASSERT_EQ(obs_rate.size(), 30);
+  // t=0..14: basal only
+  for (int i = 0; i < 15; ++i) {
+    EXPECT_NEAR(obs_rate[i], 1.0, 1e-10) << "rate t=" << i;
+    EXPECT_NEAR(obs_isc1[i], 0.0, 1e-10) << "isc1 t=" << i;
+    EXPECT_NEAR(obs_qsto1[i], 0.0, 1e-10) << "qsto1 t=" << i;
+  }
+  // t=15..29: all three events applied
+  for (int i = 15; i < 30; ++i) {
+    EXPECT_NEAR(obs_rate[i], 3.0, 1e-10) << "rate t=" << i;
+    EXPECT_NEAR(obs_isc1[i], 100.0, 1e-10) << "isc1 t=" << i;
+    EXPECT_NEAR(obs_qsto1[i], 50000.0, 1e-10) << "qsto1 t=" << i;
+  }
+
+  // --- CGM outputs ---
+  ASSERT_EQ(cgm.size(), 2);
+  EXPECT_NEAR(cgm[0], 100.0, 1e-10);
+  // t=30: after 30 steps, Gsc unchanged (mock identity dynamics)
+  EXPECT_NEAR(cgm[1], 100.0, 1e-10);
+}
+
+// ---------------------------------------------------------------------------
+//  Events past total_min() are silently ignored.
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, simulate_events_past_total_min) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::basal_insulin = 1.0;
+
+  // total_min is derived from cgm_time.back(): 20 minutes.
+  // One insulin event at t=10 (within window), one at t=100 (past).
+  // One bolus event at t=200 (past).
+  auto data = make_id_data({0.0, 20.0}, {}, {},
+                           {10.0, 100.0}, {1.0, 999.0},
+                           {200.0}, {500.0});
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> obs_rate, obs_isc1;
+  MockSimulator::step_observer =
+      [&](const BasicState<double>& s, const BasicInputs<double>& u) {
+        obs_rate.push_back(u.insulin_rate);
+        obs_isc1.push_back(s.Isc1);
+      };
+
+  std::vector<double> theta = {0.0};
+  cost.simulate_observations<double>(theta.data());
+
+  // --- event_log: only the insulin at t=10 fired ---
+  ASSERT_EQ(MockSimulator::event_log.size(), 1);
+  EXPECT_EQ(MockSimulator::event_log[0], std::pair(0, 10));
+
+  // --- step_observer: 20 steps ---
+  ASSERT_EQ(obs_rate.size(), 20);
+  // t=0..9: basal only
+  for (int i = 0; i < 10; ++i)
+    EXPECT_NEAR(obs_rate[i], 1.0, 1e-10) << "rate t=" << i;
+  // t=10..19: basal + 1.0
+  for (int i = 10; i < 20; ++i)
+    EXPECT_NEAR(obs_rate[i], 2.0, 1e-10) << "rate t=" << i;
+  // Isc1 never touched (bolus at 200 is past total_min)
+  for (int i = 0; i < 20; ++i)
+    EXPECT_NEAR(obs_isc1[i], 0.0, 1e-10) << "isc1 t=" << i;
+}

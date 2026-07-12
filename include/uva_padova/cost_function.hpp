@@ -236,6 +236,7 @@ struct ObservationCost : ceres::CostFunction {
       while (ins_idx < static_cast<int>(data_.insulin_time.size())) {
         if (static_cast<int>(data_.insulin_time[ins_idx]) == t) {
           u.insulin_rate += T(data_.insulin_rate[ins_idx]);
+          Simulator::template notify<0>(state, u, T(t));
           ins_idx++;
         } else if (data_.insulin_time[ins_idx] > t) {
           break;
@@ -248,6 +249,7 @@ struct ObservationCost : ceres::CostFunction {
       while (bolus_idx < static_cast<int>(data_.bolus_time.size())) {
         if (static_cast<int>(data_.bolus_time[bolus_idx]) == t) {
           state.Isc1 += T(data_.bolus_dose[bolus_idx]);
+          Simulator::template notify<1>(state, u, T(t));
           bolus_idx++;
         } else if (data_.bolus_time[bolus_idx] > t) {
           break;
@@ -261,6 +263,7 @@ struct ObservationCost : ceres::CostFunction {
         if (static_cast<int>(data_.meal_time[meal_idx]) == t) {
           state.Qsto1 += T(data_.meal_cho[meal_idx]);
           state.mealD = T(data_.meal_cho[meal_idx]);
+          Simulator::template notify<2>(state, u, T(t));
           meal_idx++;
         } else if (data_.meal_time[meal_idx] > t) {
           break;

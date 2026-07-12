@@ -69,9 +69,9 @@ struct ObservationCost : ceres::CostFunction {
   static constexpr int kMaxJetDim = 30;
   using JetT = ceres::Jet<double, kMaxJetDim>;
 
-  const IdentificationData& data_;
+  const IdentificationData data_;
   const Params base_params_;
-  const std::vector<ParamDescriptor>& param_desc_;
+  const std::vector<ParamDescriptor> param_desc_;
   const int n_params_;
   const int n_obs_;
   mutable int eval_count_{0};
@@ -83,6 +83,22 @@ struct ObservationCost : ceres::CostFunction {
     : data_(data), base_params_(base_params),
       param_desc_(param_desc), n_params_(static_cast<int>(param_desc.size())),
       n_obs_(static_cast<int>(data.cgm_time.size())) {
+    if (n_params_ > kMaxJetDim) {
+      std::cerr << "ObservationCost: n_params=" << n_params_
+                << " exceeds kMaxJetDim=" << kMaxJetDim << "\n";
+      std::abort();
+    }
+    set_num_residuals(n_obs_);
+    mutable_parameter_block_sizes()->push_back(n_params_);
+  }
+
+  ObservationCost(const IdentificationData& data,
+                  const Params& base_params,
+                  const std::vector<ParamDescriptor>& param_desc,
+                  double sigma)
+    : data_(data), base_params_(base_params),
+      param_desc_(param_desc), n_params_(static_cast<int>(param_desc.size())),
+      n_obs_(static_cast<int>(data.cgm_time.size())), sigma_(sigma) {
     if (n_params_ > kMaxJetDim) {
       std::cerr << "ObservationCost: n_params=" << n_params_
                 << " exceeds kMaxJetDim=" << kMaxJetDim << "\n";
@@ -198,7 +214,8 @@ struct ObservationCost : ceres::CostFunction {
 
       Eigen::Matrix<double, kMaxJetDim, 1> di_ss;
       di_ss.setZero();
-      std::vector<Eigen::Matrix<double, kMaxJetDim, 1>> dstate(BasicState<T>::kSize);
+      using AlignedMat = Eigen::Matrix<double, kMaxJetDim, 1>;
+      std::vector<AlignedMat, Eigen::aligned_allocator<AlignedMat>> dstate(BasicState<T>::kSize);
       for (auto& v : dstate) v.setZero();
 
       for (int pi = 0; pi < n_params_; ++pi) {

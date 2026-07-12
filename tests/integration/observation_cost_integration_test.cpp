@@ -97,3 +97,28 @@ TEST(ObservationCostIntegrationTest, raw_gradients_sanity) {
   for (int i = 0; i < J_raw.size(); ++i)
     EXPECT_TRUE(std::isfinite(J_raw.data()[i]));
 }
+
+// ---------------------------------------------------------------------------
+//  Gradient stability at extreme parameter values (large/small theta).
+// ---------------------------------------------------------------------------
+TEST(ObservationCostIntegrationTest, gradient_extreme_theta) {
+  auto data = make_id_data({0.0, 60.0, 120.0},
+                           {30.0}, {60000.0});
+  std::vector<ParamDescriptor> descs = {{"kp1"}, {"Vm0"}, {"p2U"}};
+  ObservationCost<> cost(data, Params::defaults_t1d(), descs);
+
+  // theta = 5.0 → exp(5.0) ≈ 148x multiplier
+  // theta = -5.0 → exp(-5.0) ≈ 0.0067x multiplier
+  std::vector<double> theta = {5.0, -5.0, 2.0};
+
+  std::vector<double> residuals(cost.n_obs_);
+  std::vector<double> J_buf(cost.n_obs_ * cost.n_params_);
+  double* J_ptrs[] = {J_buf.data()};
+  const double* tptr = theta.data();
+  EXPECT_TRUE(cost.Evaluate(&tptr, residuals.data(), J_ptrs));
+
+  for (int i = 0; i < cost.n_obs_; ++i)
+    EXPECT_TRUE(std::isfinite(residuals[i])) << "residual " << i;
+  for (int i = 0; i < cost.n_obs_ * cost.n_params_; ++i)
+    EXPECT_TRUE(std::isfinite(J_buf[i])) << "J entry " << i;
+}

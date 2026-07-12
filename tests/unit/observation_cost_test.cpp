@@ -331,6 +331,97 @@ TEST(ObservationCostGradientTest, finite_difference_check) {
 }
 
 // ---------------------------------------------------------------------------
+//  Gradient convergence: Jet Jacobian vs finite differences at multiple ε.
+//  Uses a single active param (kp1) so all Jacobian entries are meaningful.
+//  Verifies O(ε²) convergence of central differences for ε where truncation
+//  error dominates roundoff (ε ≥ 1e-4 with double precision).
+// ---------------------------------------------------------------------------
+TEST(ObservationCostGradientTest, gradient_convergence) {
+  LinearMockSimulator::reset();
+  LinearMockSimulator::ss_state.Gsc = 100.0;
+  LinearMockSimulator::basal_insulin = 1.0;
+
+  auto data = make_id_data({0.0, 15.0, 30.0},
+                           {}, {}, {}, {}, {}, {}, 120.0);
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<LinearMockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> theta = {0.1};
+  const int n_obs = cost.n_obs_;
+  const int n_params = cost.n_params_;
+
+  // Analytical Jacobian via Evaluate (Jet)
+  std::vector<double> residuals(n_obs);
+  std::vector<double> J_ana(n_obs * n_params);
+  double* J_ptrs[] = {J_ana.data()};
+  const double* tptr = theta.data();
+  ASSERT_TRUE(cost.Evaluate(&tptr, residuals.data(), J_ptrs));
+
+  // Finite-difference at multiple epsilons
+  auto fd_J = [&](double eps) {
+    std::vector<double> J_fd(n_obs * n_params, 0.0);
+    for (int j = 0; j < n_params; ++j) {
+      std::vector<double> th_lo = theta, th_hi = theta;
+      th_lo[j] -= eps;
+      th_hi[j] += eps;
+      auto cgm_lo = cost.simulate_observations<double>(th_lo.data());
+      auto cgm_hi = cost.simulate_observations<double>(th_hi.data());
+      for (int i = 0; i < n_obs; ++i) {
+        double r_lo = (cgm_lo[i] - data.cgm_value[i]) / cost.sigma_;
+        double r_hi = (cgm_hi[i] - data.cgm_value[i]) / cost.sigma_;
+        J_fd[i * n_params + j] = (r_hi - r_lo) / (2.0 * eps);
+      }
+    }
+    return J_fd;
+  };
+
+  // ε=1e-3 and ε=1e-4 are in truncation-dominated regime (O(ε²)).
+  // ε=1e-5 is near the optimal ε ≈ 3e-6 for this model, so roundoff
+  // contaminates the truncation error — we skip it.
+  auto J_1e3 = fd_J(1e-3);
+  auto J_1e4 = fd_J(1e-4);
+  double err_1e3 = 0.0, err_1e4 = 0.0;
+  for (int i = 0; i < n_obs * n_params; ++i) {
+    err_1e3 = std::max(err_1e3, std::abs(J_ana[i] - J_1e3[i]));
+    err_1e4 = std::max(err_1e4, std::abs(J_ana[i] - J_1e4[i]));
+  }
+  ASSERT_TRUE(std::isfinite(err_1e3));
+  ASSERT_TRUE(std::isfinite(err_1e4));
+
+  // Central difference error ∝ ε², so 10× smaller ε → 100× smaller error
+  double ratio = err_1e3 / err_1e4;
+  ASSERT_TRUE(ratio > 50.0);
+}
+
+// ---------------------------------------------------------------------------
+//  Param sensitivity: verify that kp1 always affects Gsc.
+//  Guards against accidentally choosing a descriptor whose parameter
+//  has zero effect on the simulated CGM trajectory.
+// ---------------------------------------------------------------------------
+TEST(ObservationCostGradientTest, param_sensitivity) {
+  LinearMockSimulator::reset();
+  LinearMockSimulator::ss_state.Gsc = 100.0;
+  LinearMockSimulator::basal_insulin = 1.0;
+
+  auto data = make_id_data({0.0, 15.0, 30.0});
+  ObservationCost<LinearMockSimulator> cost(data, Params::defaults_t1d(), {{"kp1"}});
+
+  std::vector<double> theta_base = {0.0};
+  std::vector<double> theta_pert = {1e-4};
+  auto cgm_base = cost.simulate_observations<double>(theta_base.data());
+  auto cgm_pert = cost.simulate_observations<double>(theta_pert.data());
+
+  ASSERT_EQ(cgm_base.size(), cgm_pert.size());
+  // Observations after at least one step (t > 0) must differ.
+  // t=0 is recorded before any step, so it's always ss_state.Gsc.
+  for (int i = 1; i < cgm_base.size(); ++i) {
+    double diff = cgm_pert[i] - cgm_base[i];
+    ASSERT_TRUE(std::isfinite(diff));
+    ASSERT_NE(diff, 0.0);
+  }
+}
+
+// ---------------------------------------------------------------------------
 //  compute_raw_gradients returns matching Jacobian
 // ---------------------------------------------------------------------------
 TEST(ObservationCostTest, raw_gradients_match_evaluate) {
@@ -536,4 +627,59 @@ TEST(ObservationCostTest, simulate_events_past_total_min) {
   // Isc1 never touched (bolus at 200 is past total_min)
   for (int i = 0; i < 20; ++i)
     EXPECT_NEAR(obs_isc1[i], 0.0, 1e-10) << "isc1 t=" << i;
+}
+
+// ---------------------------------------------------------------------------
+//  sigma scales Jacobian by 1/sigma and changes SoftLOne cost nonlinearly.
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, sigma_scales_jacobian) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::basal_insulin = 1.0;
+
+  auto data = make_id_data({0.0, 15.0, 30.0});
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  auto base = Params::defaults_t1d();
+
+  ObservationCost<MockSimulator> cost1(data, base, descs, 2.9);
+  ObservationCost<MockSimulator> cost2(data, base, descs, 5.8);
+  ASSERT_EQ(cost1.sigma_, 2.9);
+  ASSERT_EQ(cost2.sigma_, 5.8);
+
+  std::vector<double> theta = {0.1};
+  const int n_obs = cost1.n_obs_;
+  const int n_params = cost1.n_params_;
+
+  // Jacobian for sigma=2.9
+  std::vector<double> r1(n_obs), J1(n_obs * n_params);
+  double* J1p[] = {J1.data()};
+  const double* tp = theta.data();
+  ASSERT_TRUE(cost1.Evaluate(&tp, r1.data(), J1p));
+
+  // Jacobian for sigma=5.8
+  std::vector<double> r2(n_obs), J2(n_obs * n_params);
+  double* J2p[] = {J2.data()};
+  ASSERT_TRUE(cost2.Evaluate(&tp, r2.data(), J2p));
+
+  // J scales as 1/sigma: J2 = J1 * sigma1/sigma2 = J1 * 0.5
+  double ratio = cost1.sigma_ / cost2.sigma_;  // = 0.5
+  for (int i = 0; i < n_obs * n_params; ++i)
+    ASSERT_TRUE(std::abs(J2[i] - J1[i] * ratio) < 1e-15);
+
+  // Residuals also scale as 1/sigma
+  for (int i = 0; i < n_obs; ++i)
+    ASSERT_TRUE(std::abs(r2[i] - r1[i] * ratio) < 1e-15);
+
+  // Scalar cost (SoftLOne): nonlinear in r, so not simply 2x or 0.5x
+  double scalar1 = cost1.compute_scalar_cost(theta.data());
+  double scalar2 = cost2.compute_scalar_cost(theta.data());
+  EXPECT_TRUE(std::isfinite(scalar1));
+  EXPECT_TRUE(std::isfinite(scalar2));
+  // With sigma=2.9, |r| is larger → cost closer to linear (L1-like)
+  // With sigma=5.8, |r| is smaller → cost closer to quadratic (L2-like)
+  // Both should be positive and finite
+  EXPECT_GT(scalar1, 0.0);
+  EXPECT_GT(scalar2, 0.0);
+  // Since sigma1 < sigma2, |r1| > |r2|, so cost1 > cost2
+  EXPECT_GT(scalar1, scalar2);
 }

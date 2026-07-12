@@ -28,15 +28,20 @@ gtest_discover_tests(unit_core)
 gtest_discover_tests(unit_id)
 
 # ===========================================================================
-# Existing integration/experiment executables (unchanged)
+# Existing tests — migrated to gtest
 # ===========================================================================
 add_executable(test_odesystem test_odesystem.cpp)
-target_link_libraries(test_odesystem PRIVATE uva_padova_core)
+target_link_libraries(test_odesystem PRIVATE uva_padova_core GTest::gtest GTest::gtest_main)
 target_include_directories(test_odesystem PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_options(test_odesystem PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
 add_executable(test_identification test_identification.cpp)
-target_link_libraries(test_identification PRIVATE uva_padova_id)
+target_link_libraries(test_identification PRIVATE uva_padova_id GTest::gtest GTest::gtest_main)
 target_include_directories(test_identification PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_options(test_identification PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
+
+gtest_discover_tests(test_odesystem)
+gtest_discover_tests(test_identification)
 
 add_executable(exp_identifiability exp_identifiability.cpp)
 target_link_libraries(exp_identifiability PRIVATE uva_padova_id)

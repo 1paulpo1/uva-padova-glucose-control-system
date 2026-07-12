@@ -101,7 +101,6 @@ int main() {
     int event_idx = 0;
 
     for (int t = 0; t <= cfg.duration_min; ++t) {
-        // Apply events at this minute
         while (event_idx < static_cast<int>(events.size()) && events[event_idx].t == t) {
             State s = from_ode(ode_x);
             s.Qsto1 += events[event_idx].cho_mg;
@@ -111,21 +110,53 @@ int main() {
             event_idx++;
         }
 
-        // Record CGM at sample intervals
         if (t % cfg.cgm_interval == 0) {
             odeint_cgm.push_back({static_cast<double>(t), from_ode(ode_x).Gsc});
         }
 
-        // Integrate one minute forward
         if (t < cfg.duration_min) {
             odeint::integrate_adaptive(stepper, rhs_functor, ode_x,
                                        static_cast<double>(t),
                                        static_cast<double>(t + 1),
                                        0.1);
+            State s_clamp = from_ode(ode_x);
+            s_clamp.clamp_physiological();
+            ode_x = to_ode(s_clamp);
         }
     }
 
-    // ---- 6. Compare ----
+    // ---- 6. Self-consistency check: vp's RK4 vs diagnostic's own RK4 ----
+    {
+        State x_ss2;
+        double u_basal2 = SteadyStateSolver::find(x_ss2, vp.true_params, vp.true_params.Gb);
+        Inputs u2; u2.insulin_rate = u_basal2;
+
+        std::vector<std::pair<double, double>> rk4_vp;
+        int ev_idx2 = 0;
+
+        for (int t = 0; t <= cfg.duration_min; ++t) {
+            while (ev_idx2 < static_cast<int>(events.size()) && events[ev_idx2].t == t) {
+                x_ss2.Qsto1 += events[ev_idx2].cho_mg;
+                x_ss2.mealD = events[ev_idx2].cho_mg;
+                x_ss2.Isc1 += events[ev_idx2].bolus_pmol_kg;
+                ev_idx2++;
+            }
+            if (t % cfg.cgm_interval == 0)
+                rk4_vp.push_back({static_cast<double>(t), x_ss2.Gsc});
+
+            if (t < cfg.duration_min)
+                RK4Integrator::step(UvaPadovaODESystem{}, x_ss2, u2, vp.true_params, 1.0);
+        }
+
+        double max_same = 0.0;
+        for (size_t i = 0; i < std::min(rk4_t.size(), rk4_vp.size()); ++i)
+            max_same = std::max(max_same, std::abs(rk4_G[i] - rk4_vp[i].second));
+
+        std::cout << "  vp vs diag RK4 self-check: max|diff| = " << max_same << " mg/dL"
+                  << (max_same < 1e-9 ? " ✓ identical" : " ✗ MISMATCH") << "\n";
+    }
+
+    // ---- 7. Compare RK4 vs Odeint ----
     size_t n = std::min(rk4_t.size(), odeint_cgm.size());
     double max_diff = 0.0, max_diff_day = 0.0, max_diff_night = 0.0;
     double sum_abs_diff = 0.0;
@@ -152,9 +183,9 @@ int main() {
     }
     csv.close();
 
-    // ---- 7. Print results ----
+    // ---- 8. Print results ----
     std::cout << std::fixed << std::setprecision(6);
-    std::cout << "\n=== RK4 vs Odeint comparison ===\n";
+    std::cout << "\n=== RK4 h=1.0 vs Odeint comparison ===\n";
     std::cout << "  Config: 9 active params, seed=42, zero noise, "
               << cfg.duration_min / 1440 << " days\n";
     std::cout << "  max |G_rk4 - G_odeint|: " << max_diff << " mg/dL\n";
@@ -163,18 +194,10 @@ int main() {
     std::cout << "  mean |diff|:            " << (sum_abs_diff / n) << " mg/dL\n";
     std::cout << "  N samples:              " << n << "\n";
 
-    if (max_diff > 0.1) {
-        std::cout << "\n  >>> RK4 ERROR EXCEEDS 0.1 mg/dL — "
-                  << "likely cause of Gate B failure\n";
-    } else if (max_diff > 0.01) {
-        std::cout << "\n  >>> RK4 error is moderate (0.01–0.1 mg/dL) — "
-                  << "may contribute to Gate B\n";
-    } else {
-        std::cout << "\n  >>> RK4 error is negligible (<0.01 mg/dL) — "
-                  << "look elsewhere for Gate B cause\n";
-    }
+    if (max_diff < 0.001)
+        std::cout << "\n  >>> RK4 error is negligible (<0.001 mg/dL) — "
+                  << "Gate B cause must be elsewhere\n";
 
-    // Print first few diffs to see the pattern
     std::cout << "\nFirst 10 CGM samples:\n";
     std::cout << "  t\tG_rk4\tG_odeint\tdiff\n";
     for (size_t i = 0; i < std::min(n, size_t(10)); ++i) {

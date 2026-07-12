@@ -83,6 +83,8 @@ target_include_directories(uva_padova_id
   PUBLIC
     include
     ${EIGEN3_INCLUDE_DIR}
+  PRIVATE
+    /opt/homebrew/include
 )
 
 target_link_libraries(uva_padova_id

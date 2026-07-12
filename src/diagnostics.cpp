@@ -3,6 +3,7 @@
 #include <cmath>
 #include <iostream>
 #include <limits>
+#include <boost/math/statistics/ljung_box.hpp>
 #include <Eigen/Eigenvalues>
 
 namespace uva_padova {
@@ -149,54 +150,6 @@ GateAResult diagnose_multiplicity(const std::vector<RestartRecord>& restarts,
 //  Math helpers for Gate (b)
 // ===========================================================================
 
-// Regularized lower incomplete gamma function P(a,x).
-// Series for x < a+1, continued fraction for x >= a+1.
-static double regularized_gamma_P(double a, double x) {
-  if (x < 0.0 || a <= 0.0) return 0.0;
-  if (x == 0.0) return 0.0;
-
-  if (x < a + 1.0) {
-    // Series: P = e⁻ˣ xᵃ / Γ(a) · Σᵢ xⁱ / (a)₊ᵢ
-    double term = 1.0 / a;
-    double sum = term;
-    for (int i = 1; i < 1000; ++i) {
-      term *= x / (a + i);
-      sum += term;
-      if (std::abs(term) < 1e-15 * std::abs(sum))
-        break;
-    }
-    return sum * std::exp(-x + a * std::log(x) - std::lgamma(a));
-  } else {
-    // Continued fraction (Lentz): γ* = e⁻ˣ xᵃ / Γ(a) · 1/(1+) ...
-    // P = 1 - γ*
-    double f = x + 1.0 - a;
-    double C = 1.0 / 1.0e-30;
-    double D = 1.0 / f;
-    double cf = D;
-    for (int i = 1; i < 1000; ++i) {
-      double an = -i * (i - a);
-      double bn = x + 2.0 * i + 1.0 - a;
-      D = bn + an * D;
-      if (D == 0.0) D = 1.0e-30;
-      C = bn + an / C;
-      if (C == 0.0) C = 1.0e-30;
-      D = 1.0 / D;
-      double delta = C * D;
-      cf *= delta;
-      if (std::abs(delta - 1.0) < 1e-15)
-        break;
-    }
-    double log_gamma_star = -x + a * std::log(x) - std::lgamma(a) + std::log(cf);
-    return 1.0 - std::exp(log_gamma_star);
-  }
-}
-
-// Chi-squared CDF: P(χ²_k ≤ x) = P(k/2, x/2)
-static double chi_squared_cdf(double x, int k) {
-  if (x <= 0.0) return 0.0;
-  return regularized_gamma_P(0.5 * k, 0.5 * x);
-}
-
 // Regularized incomplete beta I_x(a,b) via continued fraction (Lentz)
 static double regularized_beta_inc(double a, double b, double x) {
   if (x < 0.0 || x > 1.0) return 0.0;
@@ -264,7 +217,7 @@ static double student_t_cdf(double t, int df) {
 }
 
 // ===========================================================================
-//  Ljung-Box test
+//  Ljung-Box test (wraps Boost implementation)
 // ===========================================================================
 LjungBoxResult ljung_box_test(const std::vector<double>& residuals, int max_lags) {
   LjungBoxResult result;
@@ -275,41 +228,17 @@ LjungBoxResult ljung_box_test(const std::vector<double>& residuals, int max_lags
   }
 
   max_lags = std::min(max_lags, n - 1);
-
-  // Mean-center residuals
-  double mean_r = 0.0;
-  for (double r : residuals) mean_r += r;
-  mean_r /= n;
-
-  std::vector<double> centered(n);
-  for (int i = 0; i < n; ++i)
-    centered[i] = residuals[i] - mean_r;
-
-  // Variance
-  double var = 0.0;
-  for (double r : centered) var += r * r;
-  if (var < 1e-30) {
+  if (max_lags < 1) {
     result.significant = false;
-    result.n_lags = max_lags;
     return result;
   }
 
-  // Autocorrelations at lags 1..max_lags
-  double Q = 0.0;
-  for (int h = 1; h <= max_lags; ++h) {
-    double gamma_h = 0.0;
-    for (int i = 0; i < n - h; ++i)
-      gamma_h += centered[i] * centered[i + h];
-
-    double rho_h = gamma_h / var;
-    Q += rho_h * rho_h / (n - h);
-  }
-  Q *= n * (n + 2);
+  auto [Q, p] = boost::math::statistics::ljung_box(residuals, max_lags, 0);
 
   result.Q = Q;
+  result.p_value = p;
   result.n_lags = max_lags;
-  result.p_value = 1.0 - chi_squared_cdf(Q, max_lags);
-  result.significant = (result.p_value < 0.05);
+  result.significant = (p < 0.05);
 
   return result;
 }

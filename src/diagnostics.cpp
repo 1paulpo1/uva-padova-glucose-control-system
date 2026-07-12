@@ -4,6 +4,7 @@
 #include <iostream>
 #include <limits>
 #include <boost/math/statistics/ljung_box.hpp>
+#include <boost/math/distributions/students_t.hpp>
 #include <Eigen/Eigenvalues>
 
 namespace uva_padova {
@@ -147,76 +148,6 @@ GateAResult diagnose_multiplicity(const std::vector<RestartRecord>& restarts,
 }
 
 // ===========================================================================
-//  Math helpers for Gate (b)
-// ===========================================================================
-
-// Regularized incomplete beta I_x(a,b) via continued fraction (Lentz)
-static double regularized_beta_inc(double a, double b, double x) {
-  if (x < 0.0 || x > 1.0) return 0.0;
-  if (x == 0.0 || x == 1.0) return x;
-
-  // Use symmetry: I_x(a,b) = 1 - I_{1-x}(b,a) for efficiency
-  if (x > (a + 1.0) / (a + b + 2.0)) {
-    return 1.0 - regularized_beta_inc(b, a, 1.0 - x);
-  }
-
-  double f = 1.0;
-  double C = 1.0;
-  double D = 1.0 - (a + b) * x / (a + 1.0);
-  if (std::abs(D) < 1.0e-30) D = 1.0e-30;
-  D = 1.0 / D;
-  double cf = D;
-
-  for (int m = 1; m < 1000; ++m) {
-    // Even step
-    int m2 = 2 * m;
-    double alpha = m * (b - m) * x / ((a + m2 - 1.0) * (a + m2));
-    D = 1.0 + alpha * D;
-    if (std::abs(D) < 1.0e-30) D = 1.0e-30;
-    C = 1.0 + alpha / C;
-    if (std::abs(C) < 1.0e-30) C = 1.0e-30;
-    D = 1.0 / D;
-    cf *= D * C;
-
-    // Odd step
-    alpha = -(a + m) * (a + b + m) * x / ((a + m2) * (a + m2 + 1.0));
-    D = 1.0 + alpha * D;
-    if (std::abs(D) < 1.0e-30) D = 1.0e-30;
-    C = 1.0 + alpha / C;
-    if (std::abs(C) < 1.0e-30) C = 1.0e-30;
-    D = 1.0 / D;
-    double delta = D * C;
-    cf *= delta;
-
-    if (std::abs(delta - 1.0) < 1e-15)
-      break;
-  }
-
-  double log_pre = std::lgamma(a + b) - std::lgamma(a) - std::lgamma(b)
-                   + a * std::log(x) + b * std::log(1.0 - x);
-  return std::exp(log_pre) * cf / a;
-}
-
-// Student's t CDF: P(T ≤ t) for df degrees of freedom
-//   P(T ≤ t) = ½ + ½·sign(t)·(1 - I_{df/(df+t²)}(df/2, ½))   for t ≠ 0
-//            = ½                                                  for t = 0
-static double student_t_cdf(double t, int df) {
-  if (df <= 0) return 0.5;
-  if (t == 0.0) return 0.5;
-  if (!std::isfinite(t)) return (t > 0) ? 1.0 : 0.0;
-
-  double x = static_cast<double>(df) / (df + t * t);
-  double a = 0.5 * df;
-  double b = 0.5;
-  double ib = regularized_beta_inc(a, b, x);
-
-  if (t > 0)
-    return 1.0 - 0.5 * ib;
-  else
-    return 0.5 * ib;
-}
-
-// ===========================================================================
 //  Ljung-Box test (wraps Boost implementation)
 // ===========================================================================
 LjungBoxResult ljung_box_test(const std::vector<double>& residuals, int max_lags) {
@@ -340,7 +271,9 @@ GateBResult diagnose_structural_adequacy(
       // Two-sample? No — one-sample t-test: H₀: mean=0
       if (rs.std_residual > 1e-9 && acc.count > 1) {
         double t_stat = rs.mean_residual / (rs.std_residual / std::sqrt(acc.count));
-        double p_val = 2.0 * (1.0 - student_t_cdf(std::abs(t_stat), acc.count - 1));
+        double p_val = 2.0 * boost::math::cdf(
+            boost::math::complement(boost::math::students_t(acc.count - 1),
+                                    std::abs(t_stat)));
 
         // Effect size threshold: max(10 mg/dL, 5% of mean glucose)
         double eff_thresh = std::max(bias_threshold_mgdl,

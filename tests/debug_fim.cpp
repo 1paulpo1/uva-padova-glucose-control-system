@@ -105,7 +105,7 @@ int main() {
   };
 
   auto data = generate_data(true_p, 42, true);
-  auto result = IdentificationPipeline::run(data, Params::defaults_t1d(), desc, 3, 500);
+  auto result = IdentificationPipeline<>::run(data, Params::defaults_t1d(), desc, 3, 500);
 
   // Print result cov
   std::cout << "\n=== Pipeline result ===\n";

@@ -150,7 +150,7 @@ static TrialResult run_trial(const Params& true_p,
                                        seed, config.with_bolus);
 
   CoutSilencer _silence;
-  auto result = IdentificationPipeline::run(data, base_p, desc, 3, 500);
+  auto result = IdentificationPipeline<>::run(data, base_p, desc, 3, 500);
 
   Params recovered_p = result.to_params(base_p, desc);
 

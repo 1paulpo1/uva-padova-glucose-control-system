@@ -88,7 +88,7 @@ TEST(IdentificationPipeline, synthetic_data_recovery) {
     { "p2U", 0.0, 1.0, 0.0 },
   };
 
-  auto result = IdentificationPipeline::run(data, base_p, desc, 3, 500);
+  auto result = IdentificationPipeline<>::run(data, base_p, desc, 3, 500);
 
   EXPECT_TRUE(result.success);
 

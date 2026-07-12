@@ -110,7 +110,7 @@ static void write_csv_header(std::ofstream& csv, const std::vector<ParamDescript
   csv << "\n";
 }
 
-static void write_csv_row(std::ofstream& csv, int pid, const IdentificationPipeline::Result& ires,
+static void write_csv_row(std::ofstream& csv, int pid, const IdentificationPipeline<>::Result& ires,
                           const VirtualPatientResult& vp,
                           const GateAResult& ga, const GateBResult& gb, const GateCResult& gc,
                           const std::vector<double>& abs_err,
@@ -140,7 +140,7 @@ static void write_csv_row(std::ofstream& csv, int pid, const IdentificationPipel
 // ===========================================================================
 // JSON building
 // ===========================================================================
-static json build_json_result(int pid, const IdentificationPipeline::Result& ires,
+static json build_json_result(int pid, const IdentificationPipeline<>::Result& ires,
                               const VirtualPatientResult& vp,
                               const GateAResult& ga, const GateBResult& gb, const GateCResult& gc,
                               const std::vector<double>& abs_err,
@@ -573,15 +573,15 @@ int main(int argc, char** argv) {
     std::cout << "  Identifying (" << id_data.cgm_time.size()
               << " obs, " << id_data.meal_time.size() << " meals)...\n";
 
-    IdentificationPipeline::Result ires;
+    IdentificationPipeline<>::Result ires;
     if (cli.verbose) {
-      ires = IdentificationPipeline::run(
+      ires = IdentificationPipeline<>::run(
           id_data, vp.base_params, vp.active_desc,
           cfg.n_cmaes_restarts, cfg.cmaes_evals,
           lm_max_iters, cmaes_lower, cmaes_upper);
     } else {
       CoutSilencer silence;
-      ires = IdentificationPipeline::run(
+      ires = IdentificationPipeline<>::run(
           id_data, vp.base_params, vp.active_desc,
           cfg.n_cmaes_restarts, cfg.cmaes_evals,
           lm_max_iters, cmaes_lower, cmaes_upper);

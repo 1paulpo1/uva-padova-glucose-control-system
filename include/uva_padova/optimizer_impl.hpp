@@ -1,0 +1,277 @@
+#pragma once
+
+#include "uva_padova/config_loader.hpp"
+
+#include <cmath>
+#include <iostream>
+#include <random>
+
+#include <ceres/ceres.h>
+#include <Eigen/Dense>
+
+namespace uva_padova {
+
+// ===========================================================================
+// Ceres Levenberg-Marquardt optimizer (templated on Simulator)
+// ===========================================================================
+template <typename Simulator>
+LMOptimizer::Result LMOptimizer::run(
+    const std::vector<double>& initial_params,
+    ObservationCost<Simulator>& obs_cost,
+    PriorCost& prior_cost,
+    int max_iters)
+{
+  std::vector<double> x = initial_params;
+
+  ceres::Problem::Options problem_options;
+  problem_options.cost_function_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
+  ceres::Problem problem(problem_options);
+
+  problem.AddResidualBlock(&obs_cost, new ceres::SoftLOneLoss(1.0), x.data());
+  problem.AddResidualBlock(&prior_cost, nullptr, x.data());
+
+  for (int i = 0; i < obs_cost.n_params_; ++i) {
+    problem.SetParameterLowerBound(x.data(), i, -3.0);
+    problem.SetParameterUpperBound(x.data(), i, 3.0);
+  }
+
+  ceres::Solver::Options options;
+  options.minimizer_type = ceres::TRUST_REGION;
+  options.trust_region_strategy_type = ceres::LEVENBERG_MARQUARDT;
+  options.max_num_iterations = max_iters;
+  options.function_tolerance = 1e-8;
+  options.gradient_tolerance = 1e-10;
+  options.parameter_tolerance = 1e-8;
+  options.minimizer_progress_to_stdout = true;
+  options.logging_type = ceres::PER_MINIMIZER_ITERATION;
+
+  ceres::Solver::Summary summary;
+  ceres::Solve(options, &problem, &summary);
+
+  ceres::Covariance::Options cov_options;
+  cov_options.apply_loss_function = true;
+  ceres::Covariance covariance(cov_options);
+
+  Eigen::MatrixXd cov_matrix;
+  {
+    int dim = obs_cost.n_params_;
+    std::vector<std::pair<const double*, const double*>> cov_blocks;
+    cov_blocks.push_back({x.data(), x.data()});
+    if (covariance.Compute(cov_blocks, &problem)) {
+      cov_matrix.resize(dim, dim);
+      covariance.GetCovarianceBlock(x.data(), x.data(), cov_matrix.data());
+    } else {
+      cov_matrix = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
+    }
+  }
+
+  std::cout << "  LM: " << summary.BriefReport() << "\n";
+
+  Result res;
+  res.final_params = x;
+  res.n_iters      = static_cast<int>(summary.iterations.size());
+  res.converged    = summary.termination_type == ceres::CONVERGENCE;
+  res.final_cost   = summary.final_cost;
+  res.cov          = std::move(cov_matrix);
+
+  return res;
+}
+
+template <typename Simulator>
+LMOptimizer::CovarianceResult LMOptimizer::compute_covariance(
+    const std::vector<double>& theta,
+    ObservationCost<Simulator>& obs_cost,
+    PriorCost& prior_cost)
+{
+  int dim = static_cast<int>(theta.size());
+  if (dim == 0) return {};
+
+  std::vector<double> x = theta;
+
+  ceres::Problem::Options tmp_problem_options;
+  tmp_problem_options.cost_function_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
+  ceres::Problem tmp_problem(tmp_problem_options);
+  tmp_problem.AddResidualBlock(&obs_cost, new ceres::SoftLOneLoss(1.0), x.data());
+  tmp_problem.AddResidualBlock(&prior_cost, nullptr, x.data());
+
+  ceres::Covariance::Options cov_opts;
+  ceres::Covariance tmp_cov(cov_opts);
+  std::vector<std::pair<const double*, const double*>> cb = {
+      {x.data(), x.data()}};
+
+  Eigen::MatrixXd cov_mat = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
+  if (tmp_cov.Compute(cb, &tmp_problem)) {
+    cov_mat.resize(dim, dim);
+    tmp_cov.GetCovarianceBlock(x.data(), x.data(), cov_mat.data());
+  }
+
+  return {cov_mat, {}};
+}
+
+// ===========================================================================
+// Pipeline: CMA-ES (×N restarts) → LM → top result
+// ===========================================================================
+template <typename CMAES, typename LM>
+auto IdentificationPipeline<CMAES, LM>::run(
+    const IdentificationData& data,
+    const Params& base_params,
+    const std::vector<ParamDescriptor>& param_desc,
+    int n_cmaes_restarts,
+    int cmaes_evals,
+    int lm_max_iters,
+    double cmaes_lower,
+    double cmaes_upper) -> Result
+{
+  int dim = static_cast<int>(param_desc.size());
+
+  ObservationCost<> obs_cost(data, base_params, param_desc);
+  PriorCost prior_cost(param_desc);
+
+  std::vector<double> initial_sigma(dim);
+  for (int i = 0; i < dim; ++i)
+    initial_sigma[i] = param_desc[i].prior_std;
+
+  double best_cma_cost = 1e20;
+  std::vector<double> best_cma_point(dim, 0.0);
+  std::vector<RestartRecord> restart_points;
+  restart_points.reserve(n_cmaes_restarts);
+
+  std::function<double(const double*, int)> fit_func =
+      [&obs_cost, &prior_cost](const double* x, int n) -> double {
+    (void)n;
+    double fval = obs_cost.compute_scalar_cost(x) + prior_cost.compute_scalar_prior(x);
+    if (!std::isfinite(fval)) return 1e20;
+    return fval;
+  };
+
+  for (int restart = 0; restart < n_cmaes_restarts; ++restart) {
+    int seed = static_cast<int>(std::random_device{}());
+    auto cmaes_res = CMAES::run(fit_func, initial_sigma, cmaes_evals,
+                                 seed, cmaes_lower, cmaes_upper);
+
+    if (cmaes_res.best_cost < best_cma_cost) {
+      best_cma_cost = cmaes_res.best_cost;
+      best_cma_point = cmaes_res.best_params;
+    }
+
+    restart_points.push_back({cmaes_res.best_params, cmaes_res.best_cost});
+
+    std::cout << "  CMA-ES restart " << (restart + 1) << "/"
+              << n_cmaes_restarts << ": cost=" << cmaes_res.best_cost
+              << " fevals=" << cmaes_res.n_evals << "\n";
+  }
+
+  auto lm_res = LM::run(best_cma_point, obs_cost, prior_cost, lm_max_iters);
+
+  Result result;
+  bool cmaes_failed = (best_cma_cost >= 1e19);
+  bool lm_valid = std::isfinite(lm_res.final_cost) && lm_res.final_cost >= 0;
+  if (lm_valid && lm_res.final_cost < best_cma_cost && (cmaes_failed || lm_res.converged)) {
+    std::cout << "  LM improved cost: " << lm_res.final_cost
+              << " (iters=" << lm_res.n_iters << ")\n";
+    result.params  = lm_res.final_params;
+    result.cost    = lm_res.final_cost;
+    result.success = true;
+  } else if (cmaes_failed) {
+    std::cout << "  CMA-ES and LM both failed; marking as failure\n";
+    result.params  = best_cma_point;
+    result.cost    = best_cma_cost;
+    result.success = false;
+  } else {
+    std::cout << "  LM did not improve; using CMA-ES best point\n";
+    result.params  = best_cma_point;
+    result.cost    = best_cma_cost;
+    result.success = true;
+  }
+  result.total_evals = obs_cost.eval_count();
+  result.all_restarts = std::move(restart_points);
+
+  if (result.success && !result.params.empty()) {
+    int dim = obs_cost.n_params_;
+    if (lm_res.cov.rows() == dim && result.params == lm_res.final_params) {
+      result.cov = lm_res.cov;
+    } else {
+      auto cov_res = LM::compute_covariance(result.params, obs_cost, prior_cost);
+      result.cov = cov_res.cov;
+    }
+    std::cout << "  [debug] covariance done\n";
+  }
+  result.cov_sandwich = Eigen::MatrixXd{};
+
+  return result;
+}
+
+template <typename CMAES, typename LM>
+auto IdentificationPipeline<CMAES, LM>::run_from_config(
+    const IdentificationData& data,
+    const Params& base_params,
+    const std::string& json_path,
+    int n_cmaes_restarts,
+    int cmaes_evals,
+    std::vector<ParamDescriptor>* full_desc) -> Result
+{
+  auto all = load_param_descriptors(json_path);
+  if (all.empty()) {
+    std::cerr << "pipeline: failed to load config from " << json_path << "\n";
+    Result err;
+    err.success = false;
+    return err;
+  }
+
+  if (full_desc)
+    *full_desc = all;
+
+  auto active = active_descriptors(all);
+  std::cout << "  Config: " << all.size() << " params total, "
+            << active.size() << " active ("
+            << (all.size() - active.size()) << " fixed)\n";
+
+  return run(data, base_params, active, n_cmaes_restarts, cmaes_evals);
+}
+
+template <typename CMAES, typename LM>
+Params IdentificationPipeline<CMAES, LM>::Result::to_params(
+    const Params& base,
+    const std::vector<ParamDescriptor>& desc) const
+{
+  Params p = base;
+  for (size_t i = 0; i < params.size() && i < desc.size(); ++i) {
+    double mult = std::exp(params[i]);
+
+    if (desc[i].name == "kp1")  p.kp1  *= mult;
+    if (desc[i].name == "kp2")  p.kp2  *= mult;
+    if (desc[i].name == "kp3")  p.kp3  *= mult;
+    if (desc[i].name == "Vm0")  p.Vm0  *= mult;
+    if (desc[i].name == "Vmx")  p.Vmx  *= mult;
+    if (desc[i].name == "p2U")  p.p2U  *= mult;
+    if (desc[i].name == "ka1")  p.ka1  *= mult;
+    if (desc[i].name == "ka2")  p.ka2  *= mult;
+    if (desc[i].name == "kd")   p.kd   *= mult;
+    if (desc[i].name == "kmax") p.kmax *= mult;
+    if (desc[i].name == "kmin") p.kmin *= mult;
+    if (desc[i].name == "kabs") p.kabs *= mult;
+    if (desc[i].name == "kgri") p.kgri *= mult;
+    if (desc[i].name == "VG")   p.VG   *= mult;
+    if (desc[i].name == "VI")   p.VI   *= mult;
+    if (desc[i].name == "Gb")   p.Gb   *= mult;
+    if (desc[i].name == "Ib")   p.Ib   *= mult;
+    if (desc[i].name == "k1")   p.k1   *= mult;
+    if (desc[i].name == "k2")   p.k2   *= mult;
+    if (desc[i].name == "m1")   p.m1   *= mult;
+    if (desc[i].name == "m2")   p.m2   *= mult;
+    if (desc[i].name == "m4")   p.m4   *= mult;
+    if (desc[i].name == "ki")   p.ki   *= mult;
+    if (desc[i].name == "f")    p.f    *= mult;
+    if (desc[i].name == "b")    p.b    *= mult;
+    if (desc[i].name == "d")    p.d    *= mult;
+    if (desc[i].name == "ke1")  p.ke1  *= mult;
+    if (desc[i].name == "ke2")  p.ke2  *= mult;
+    if (desc[i].name == "Ts")   p.Ts   *= mult;
+    if (desc[i].name == "r1")   p.r1   *= mult;
+    if (desc[i].name == "Gth")  p.Gth  *= mult;
+    if (desc[i].name == "BW")   p.BW   *= mult;
+  }
+  return p;
+}
+
+} // namespace uva_padova

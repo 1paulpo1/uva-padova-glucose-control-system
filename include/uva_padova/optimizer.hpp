@@ -43,8 +43,9 @@ struct LMOptimizer {
     Eigen::MatrixXd cov_sandwich;
   };
 
+  template <typename Simulator = UvaPadovaSimulator>
   static Result run(const std::vector<double>& initial_params,
-                    ObservationCost<>& obs_cost,
+                    ObservationCost<Simulator>& obs_cost,
                     PriorCost& prior_cost,
                     int max_iters = 100);
 
@@ -55,9 +56,10 @@ struct LMOptimizer {
       PriorCost& prior_cost);
 
   // Ceres Covariance block at an arbitrary point (replaces Pipeline inline fallback)
+  template <typename Simulator = UvaPadovaSimulator>
   static CovarianceResult compute_covariance(
       const std::vector<double>& theta,
-      ObservationCost<>& obs_cost,
+      ObservationCost<Simulator>& obs_cost,
       PriorCost& prior_cost);
 };
 
@@ -69,6 +71,7 @@ struct RestartRecord {
   double cost{1e20};
 };
 
+template <typename CMAES = CMAESOptimizer, typename LM = LMOptimizer>
 struct IdentificationPipeline {
   struct Result {
     std::vector<double> params;
@@ -105,3 +108,5 @@ struct IdentificationPipeline {
 };
 
 } // namespace uva_padova
+
+#include "uva_padova/optimizer_impl.hpp"

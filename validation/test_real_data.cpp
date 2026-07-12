@@ -118,10 +118,10 @@ int main(int argc, char* argv[]) {
 
   std::vector<ParamDescriptor> full_desc;
   auto result = use_config
-    ? IdentificationPipeline::run_from_config(data, base_params,
+    ? IdentificationPipeline<>::run_from_config(data, base_params,
         UVA_PADOVA_CONFIG_DIR "/default_params.json",
         n_restarts, cmaes_evals, &full_desc)
-    : IdentificationPipeline::run(data, base_params, desc, n_restarts, cmaes_evals);
+    : IdentificationPipeline<>::run(data, base_params, desc, n_restarts, cmaes_evals);
 
   if (!result.success) {
     std::cerr << "Pipeline failed\n";

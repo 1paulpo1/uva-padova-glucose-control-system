@@ -210,7 +210,10 @@ IdentificationPipeline::Result IdentificationPipeline::run(
     const Params& base_params,
     const std::vector<ParamDescriptor>& param_desc,
     int n_cmaes_restarts,
-    int cmaes_evals)
+    int cmaes_evals,
+    int lm_max_iters,
+    double cmaes_lower,
+    double cmaes_upper)
 {
   int dim = static_cast<int>(param_desc.size());
 
@@ -233,10 +236,10 @@ IdentificationPipeline::Result IdentificationPipeline::run(
     std::vector<double> x0(dim, 0.0);
 
     // Build CMA-ES parameters with random seed
-    // Bounds θ ∈ [-3, 3] (log-space: multiplier ∈ [0.05, 20])
+    // Bounds in log-space
     uint64_t rng_seed = static_cast<uint64_t>(std::random_device{}());
-    std::vector<double> lbounds(dim, -3.0);
-    std::vector<double> ubounds(dim, 3.0);
+    std::vector<double> lbounds(dim, cmaes_lower);
+    std::vector<double> ubounds(dim, cmaes_upper);
     libcmaes::CMAParameters<> cmap(x0, initial_sigma, -1,
                                     lbounds, ubounds, rng_seed);
     cmap.set_algo(CMAES_DEFAULT);
@@ -276,7 +279,7 @@ IdentificationPipeline::Result IdentificationPipeline::run(
   }
 
   // ---- LM refinement ---
-  auto lm_res = LMOptimizer::run(best_cma_point, obs_cost, prior_cost, 100);
+  auto lm_res = LMOptimizer::run(best_cma_point, obs_cost, prior_cost, lm_max_iters);
 
   // Aggregate results
   Result result;

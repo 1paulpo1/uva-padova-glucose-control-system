@@ -80,7 +80,10 @@ struct IdentificationPipeline {
                     const Params& base_params,
                     const std::vector<ParamDescriptor>& param_desc,
                     int n_cmaes_restarts = 3,
-                    int cmaes_evals = 1000);
+                    int cmaes_evals = 1000,
+                    int lm_max_iters = 100,
+                    double cmaes_lower = -3.0,
+                    double cmaes_upper = 3.0);
 
   // Convenience overload: load param descriptors from JSON config,
   // filter to only non-fixed params, and run the pipeline.

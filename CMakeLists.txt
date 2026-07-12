@@ -112,3 +112,6 @@ add_subdirectory(tests)
 
 # Validation (CSV output, plotted via Python)
 add_subdirectory(validation)
+
+# Cross-validation
+add_subdirectory(crossval)

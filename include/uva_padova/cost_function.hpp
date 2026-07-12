@@ -171,6 +171,7 @@ struct ObservationCost : ceres::CostFunction {
   // Returns Σ log(cosh(r_i))  — matches Ceres ½·Σ residual² with sqrt-trick.
   double compute_scalar_cost(const double* params) const {
     using std::log; using std::cosh;
+    eval_count_++;
     double total = 0.0;
     auto cgm = simulate_observations<double>(params);
     for (int i = 0; i < n_obs_; ++i) {

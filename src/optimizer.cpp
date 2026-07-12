@@ -189,13 +189,18 @@ LMOptimizer::CovarianceResult LMOptimizer::compute_covariance_at(
   Eigen::MatrixXd H = Eigen::MatrixXd::Zero(n_params, n_params);
   Eigen::MatrixXd V = Eigen::MatrixXd::Zero(n_params, n_params);
 
+  ceres::SoftLOneLoss loss(1.0);
+  double rho[3];
+
   for (int i = 0; i < n_obs; ++i) {
     double r   = raw_resid[i];
-    double r1  = std::tanh(r);           // ρ'(r)
-    double r2  = 1.0 - r1 * r1;          // ρ''(r) = sech²(r)
+    double s   = r * r;
+    loss.Evaluate(s, rho);
+    double drho_dr   = rho[1] * 2.0 * r;
+    double d2rho_dr2 = rho[1] * 2.0 + rho[2] * 4.0 * s;
     Eigen::Matrix<double, 1, Eigen::Dynamic> g = J_raw.row(i);
-    H += r2 * g.transpose() * g;
-    V += (r1 * r1) * g.transpose() * g;
+    H += d2rho_dr2 * g.transpose() * g;
+    V += (drho_dr * drho_dr) * g.transpose() * g;
   }
 
   // Prior Hessian Σ₀⁻¹ — J_prior is diagonal diag(1/σᵢ)

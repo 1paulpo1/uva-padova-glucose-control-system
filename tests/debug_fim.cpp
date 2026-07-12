@@ -21,6 +21,7 @@
 #include "uva_padova/optimizer.hpp"
 #include "uva_padova/diagnostics.hpp"
 #include "uva_padova/constants.hpp"
+#include <ceres/loss_function.h>
 
 using namespace uva_padova;
 
@@ -361,13 +362,18 @@ int main() {
   Eigen::MatrixXd Hs = Eigen::MatrixXd::Zero(n_params, n_params);
   Eigen::MatrixXd Vs = Eigen::MatrixXd::Zero(n_params, n_params);
 
+  ceres::SoftLOneLoss loss(1.0);
+  double rho[3];
+
   for (int i = 0; i < n_obs; ++i) {
     double r   = raw_resid[i];
-    double r1  = std::tanh(r);       // ρ'(r)
-    double r2  = 1.0 - r1 * r1;      // ρ''(r) = sech²(r)
+    double s   = r * r;
+    loss.Evaluate(s, rho);
+    double drho_dr   = rho[1] * 2.0 * r;
+    double d2rho_dr2 = rho[1] * 2.0 + rho[2] * 4.0 * s;
     auto g     = J_raw.row(i);
-    Hs += r2 * g.transpose() * g;
-    Vs += (r1 * r1) * g.transpose() * g;
+    Hs += d2rho_dr2 * g.transpose() * g;
+    Vs += (drho_dr * drho_dr) * g.transpose() * g;
   }
 
   // Prior Hessian: Σ₀⁻¹ = diag(1/σ_i²)

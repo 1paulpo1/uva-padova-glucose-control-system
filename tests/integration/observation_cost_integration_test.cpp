@@ -12,8 +12,9 @@ using namespace uva_padova;
 //  Integration test: real ODE, no NaN/Inf, doesn't crash
 // ---------------------------------------------------------------------------
 TEST(ObservationCostIntegrationTest, real_ode_sanity) {
-  auto data = make_id_data(60, {0.0, 30.0, 60.0},
+  auto data = make_id_data({0.0, 30.0, 60.0},
                            {30.0}, {60000.0},
+                           {}, {},
                            {0.0}, {100.0});
   std::vector<ParamDescriptor> descs = {{"kp1"}, {"Vm0"}, {"p2U"}};
   auto base = Params::defaults_t1d();
@@ -55,7 +56,7 @@ TEST(ObservationCostIntegrationTest, real_ode_sanity) {
 // ---------------------------------------------------------------------------
 TEST(ObservationCostIntegrationTest, zero_input_near_gb) {
   // No meals, no boluses — just basal insulin
-  auto data = make_id_data(120, {0.0, 60.0, 120.0});
+  auto data = make_id_data({0.0, 60.0, 120.0});
   std::vector<ParamDescriptor> descs = {{"kp1"}};
   auto base = Params::defaults_t1d();
 
@@ -77,7 +78,7 @@ TEST(ObservationCostIntegrationTest, zero_input_near_gb) {
 //  Integration test: compute_raw_gradients doesn't crash
 // ---------------------------------------------------------------------------
 TEST(ObservationCostIntegrationTest, raw_gradients_sanity) {
-  auto data = make_id_data(60, {0.0, 30.0, 60.0},
+  auto data = make_id_data({0.0, 30.0, 60.0},
                            {30.0}, {60000.0});
   std::vector<ParamDescriptor> descs = {{"kp1"}, {"Vm0"}, {"p2U"}};
   ObservationCost<> cost(data, Params::defaults_t1d(), descs);

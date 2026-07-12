@@ -23,7 +23,7 @@ TEST(ObservationCostDeathTest, too_many_params) {
 // ---------------------------------------------------------------------------
 TEST(ObservationCostTest, empty_data) {
   std::vector<ParamDescriptor> descs = {{"kp1"}};
-  auto data = make_id_data(0, {});
+  auto data = make_id_data({});
   ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
 
   EXPECT_EQ(cost.n_obs_, 0);
@@ -45,7 +45,7 @@ TEST(ObservationCostTest, evaluate_no_jacobian) {
   MockSimulator::ss_state.Gsc = 100.0;
   MockSimulator::basal_insulin = 1.0;
 
-  auto data = make_id_data(60, {0.0, 30.0, 60.0}, {}, {}, {}, {}, 120.0);
+  auto data = make_id_data({0.0, 30.0, 60.0}, {}, {}, {}, {}, {}, {}, 120.0);
   std::vector<ParamDescriptor> descs = {{"kp1"}};
   ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
 
@@ -72,7 +72,7 @@ TEST(ObservationCostTest, evaluate_with_jacobian) {
   MockSimulator::ss_state.Gsc = 100.0;
   MockSimulator::basal_insulin = 1.0;
 
-  auto data = make_id_data(10, {0.0, 10.0}, {}, {}, {}, {}, 120.0);
+  auto data = make_id_data({0.0, 10.0}, {}, {}, {}, {}, {}, {}, 120.0);
   std::vector<ParamDescriptor> descs = {{"kp1"}, {"kp2"}};
   ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
 
@@ -99,7 +99,7 @@ TEST(ObservationCostTest, scalar_cost) {
   MockSimulator::reset();
   MockSimulator::ss_state.Gsc = 100.0;
 
-  auto data = make_id_data(10, {0.0, 10.0}, {}, {}, {}, {}, 120.0);
+  auto data = make_id_data({0.0, 10.0}, {}, {}, {}, {}, {}, {}, 120.0);
   std::vector<ParamDescriptor> descs = {{"kp1"}};
   ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
 
@@ -120,7 +120,7 @@ TEST(ObservationCostTest, scalar_cost_zero) {
   MockSimulator::reset();
   MockSimulator::ss_state.Gsc = 120.0;  // Matches cgm_value_fill in make_id_data
 
-  auto data = make_id_data(10, {0.0, 5.0, 10.0}, {}, {}, {}, {}, 120.0);
+  auto data = make_id_data({0.0, 5.0, 10.0}, {}, {}, {}, {}, {}, {}, 120.0);
   std::vector<ParamDescriptor> descs = {{"kp1"}};
   ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
 
@@ -136,7 +136,7 @@ TEST(ObservationCostTest, simulate_identity) {
   MockSimulator::ss_state.Gsc = 100.0;
   MockSimulator::basal_insulin = 1.0;
 
-  auto data = make_id_data(60, {0.0, 30.0, 60.0});
+  auto data = make_id_data({0.0, 30.0, 60.0});
   std::vector<ParamDescriptor> descs = {{"kp1"}};
   ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
 
@@ -177,7 +177,7 @@ TEST(ObservationCostTest, simulate_with_meal) {
   // At t=29: step → Gsc = 103.0
   // At t=30: apply meal, then record Gsc = 103.0, then step → 103.1
   
-  auto data = make_id_data(60, {0.0, 30.0, 60.0},
+  auto data = make_id_data({0.0, 30.0, 60.0},
                            {30.0}, {50000.0});
   std::vector<ParamDescriptor> descs = {{"kp1"}};
   ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
@@ -227,7 +227,7 @@ TEST(ObservationCostTest, time_rounding) {
   MockSimulator::step_delta = [](const BasicParams<double>&) { return 1.0; };
 
   // Times: 0.49 rounds to 0, 1.51 rounds to 2
-  auto data = make_id_data(5, {0.49, 1.51});
+  auto data = make_id_data({0.49, 1.51});
   std::vector<ParamDescriptor> descs = {{"kp1"}};
   ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
 
@@ -248,9 +248,10 @@ TEST(ObservationCostTest, time_rounding) {
 TEST(ObservationCostTest, observation_outside_window) {
   MockSimulator::reset();
   MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::step_delta = [](const BasicParams<double>&) { return 1.0; };
 
-  // total_min is derived from cgm_time.back(): 10 minutes
-  auto data = make_id_data(10, {5.0, 20.0});  // 20 > total_min
+  // total_min is derived from cgm_time.back(): 20 minutes
+  auto data = make_id_data({5.0, 20.0});
   std::vector<ParamDescriptor> descs = {{"kp1"}};
   ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
 
@@ -261,6 +262,10 @@ TEST(ObservationCostTest, observation_outside_window) {
   // Both observations should be recorded since total_min extends to cover
   // the max of cgm_time.back() (via finalize).
   ASSERT_EQ(cgm.size(), 2);
+  // After 5 steps (t=0..4): Gsc = 100.0 + 5*1.0 = 105.0
+  EXPECT_NEAR(cgm[0], 105.0, 1e-10);
+  // After 20 steps (t=0..19): Gsc = 100.0 + 20*1.0 = 120.0
+  EXPECT_NEAR(cgm[1], 120.0, 1e-10);
 }
 
 // ---------------------------------------------------------------------------
@@ -272,9 +277,8 @@ TEST(ObservationCostGradientTest, finite_difference_check) {
   LinearMockSimulator::ss_state.Gsc = 100.0;
   LinearMockSimulator::basal_insulin = 1.0;
 
-  const int total_min = 30;
-  auto data = make_id_data(total_min, {0.0, 15.0, 30.0},
-                           {}, {}, {}, {}, 120.0);
+  auto data = make_id_data({0.0, 15.0, 30.0},
+                           {}, {}, {}, {}, {}, {}, 120.0);
 
   // We'll adjust two params: kp1 and VG (to have multiple active params)
   std::vector<ParamDescriptor> descs = {{"kp1"}, {"VG"}};
@@ -334,7 +338,7 @@ TEST(ObservationCostTest, raw_gradients_match_evaluate) {
   LinearMockSimulator::ss_state.Gsc = 100.0;
   LinearMockSimulator::basal_insulin = 1.0;
 
-  auto data = make_id_data(20, {0.0, 10.0, 20.0});
+  auto data = make_id_data({0.0, 10.0, 20.0});
   std::vector<ParamDescriptor> descs = {{"kp1"}, {"Vm0"}};
   ObservationCost<LinearMockSimulator> cost(data, Params::defaults_t1d(), descs);
 
@@ -359,4 +363,77 @@ TEST(ObservationCostTest, raw_gradients_match_evaluate) {
   for (int i = 0; i < cost.n_obs_; ++i)
     for (int j = 0; j < cost.n_params_; ++j)
       EXPECT_NEAR(J2(i, j), J1[i * cost.n_params_ + j], 1e-12);
+}
+
+// ---------------------------------------------------------------------------
+//  Insulin events: u.insulin_rate increases at event times
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, simulate_with_insulin_events) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::basal_insulin = 1.0;
+
+  // Insulin events: +5 at t=10, +3 at t=20
+  auto data = make_id_data({0.0, 30.0}, {}, {},
+                           {10.0, 20.0}, {5.0, 3.0});
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> observed_rates;
+  MockSimulator::step_observer =
+      [&](const BasicState<double>&, const BasicInputs<double>& u) {
+        observed_rates.push_back(u.insulin_rate);
+      };
+
+  std::vector<double> theta = {0.0};
+  cost.simulate_observations<double>(theta.data());
+
+  // 30 steps (t=0..29). Observer fires after step_count incremented.
+  // step_count-1 = t (step_count starts at 1 on first call).
+  // Event at t=10 is applied BEFORE step at t=10 → observed in entry 10.
+  //   t=0..9:   rate = 1.0 (basal only)
+  //   t=10..19: rate = 6.0 (basal + 5)
+  //   t=20..29: rate = 9.0 (basal + 5 + 3)
+  ASSERT_EQ(observed_rates.size(), 30);
+  for (int i = 0; i < 10; ++i)
+    EXPECT_NEAR(observed_rates[i], 1.0, 1e-10) << "t=" << i;
+  for (int i = 10; i < 20; ++i)
+    EXPECT_NEAR(observed_rates[i], 6.0, 1e-10) << "t=" << i;
+  for (int i = 20; i < 30; ++i)
+    EXPECT_NEAR(observed_rates[i], 9.0, 1e-10) << "t=" << i;
+}
+
+// ---------------------------------------------------------------------------
+//  Bolus events: state.Isc1 increases at event times
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, simulate_with_bolus_events) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::basal_insulin = 1.0;
+
+  // Bolus event: +200 at t=15
+  auto data = make_id_data({0.0, 20.0}, {}, {},
+                           {}, {},
+                           {15.0}, {200.0});
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> observed_isc1;
+  MockSimulator::step_observer =
+      [&](const BasicState<double>& s, const BasicInputs<double>&) {
+        observed_isc1.push_back(s.Isc1);
+      };
+
+  std::vector<double> theta = {0.0};
+  cost.simulate_observations<double>(theta.data());
+
+  // 20 steps (t=0..19).
+  // Event at t=15 is applied BEFORE step at t=15 → observed in entry 15.
+  //   t=0..14:  Isc1 = 0.0 (no bolus yet)
+  //   t=15..19: Isc1 = 200.0
+  ASSERT_EQ(observed_isc1.size(), 20);
+  for (int i = 0; i < 15; ++i)
+    EXPECT_NEAR(observed_isc1[i], 0.0, 1e-10) << "t=" << i;
+  for (int i = 15; i < 20; ++i)
+    EXPECT_NEAR(observed_isc1[i], 200.0, 1e-10) << "t=" << i;
 }

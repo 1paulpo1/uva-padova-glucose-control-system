@@ -1,5 +1,7 @@
 #pragma once
 
+#include <functional>
+
 #include "uva_padova/types.hpp"
 #include "uva_padova/cost_function.hpp"
 
@@ -16,12 +18,16 @@ struct MockSimulator {
   static inline double basal_insulin{0.0};
   static inline int step_count{0};
   static inline double (*step_delta)(const BasicParams<double>&) = nullptr;
+  static inline std::function<void(const BasicState<double>&,
+                                    const BasicInputs<double>&)> step_observer;
 
   static void reset() {
     ss_state = State{};
     basal_insulin = 0.0;
     step_count = 0;
     step_delta = nullptr;
+    step_observer = std::function<void(const BasicState<double>&,
+                                        const BasicInputs<double>&)>{};
   }
 
   static double find_steady_state(State& out,
@@ -32,10 +38,11 @@ struct MockSimulator {
   }
 
   template<typename T>
-  static void step(BasicState<T>& state, const BasicInputs<T>& /*u*/,
+  static void step(BasicState<T>& state, const BasicInputs<T>& u,
                    const BasicParams<T>& p, double /*dt*/) {
     if constexpr (std::is_same_v<T, double>) {
       ++step_count;
+      if (step_observer) step_observer(state, u);
       if (step_delta) state.Gsc += T(step_delta(p));
     }
   }

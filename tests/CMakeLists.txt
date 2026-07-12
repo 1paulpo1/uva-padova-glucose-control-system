@@ -48,7 +48,7 @@ target_link_options(test_odesystem PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
 add_executable(test_identification integration/identification_pipeline_test.cpp)
 target_link_libraries(test_identification PRIVATE uva_padova_id GTest::gtest GTest::gtest_main)
-target_include_directories(test_identification PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_include_directories(test_identification PRIVATE ${CMAKE_SOURCE_DIR}/include ${CMAKE_SOURCE_DIR}/tests)
 target_link_options(test_identification PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
 gtest_discover_tests(test_odesystem)

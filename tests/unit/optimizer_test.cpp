@@ -2,6 +2,7 @@
 #include <functional>
 #include <vector>
 #include <cmath>
+#include <random>
 #include <Eigen/Core>
 
 #include "uva_padova/optimizer.hpp"
@@ -267,6 +268,91 @@ TEST_F(CMAESOptimizerTest, max_evals_respected) {
   const int max_evals = 100;
   auto res = CMAESOptimizer::run(fit, {1.0}, max_evals, 42);
   EXPECT_LE(res.n_evals, max_evals);
+}
+
+TEST_F(CMAESOptimizerTest, bounds_respected_when_minimum_outside) {
+  std::function<double(const double*, int)> fit =
+      [](const double* x, int) -> double {
+    return (x[0]-2)*(x[0]-2) + (x[1]+2)*(x[1]+2);
+  };
+
+  auto res = CMAESOptimizer::run(fit, {1.0, 1.0}, 2000, 42, -1.0, 1.0);
+
+  EXPECT_TRUE(std::isfinite(res.best_cost));
+  ASSERT_EQ(res.best_params.size(), 2);
+  EXPECT_GE(res.best_params[0], -1.0);
+  EXPECT_LE(res.best_params[0],  1.0);
+  EXPECT_GE(res.best_params[1], -1.0);
+  EXPECT_LE(res.best_params[1],  1.0);
+  EXPECT_LT(res.best_cost, 50.0);
+}
+
+TEST_F(CMAESOptimizerTest, different_param_scales) {
+  std::function<double(const double*, int)> fit =
+      [](const double* x, int) -> double {
+    double a = 100.0 * x[0];
+    double b = 0.01 * x[1];
+    return a*a + b*b;
+  };
+
+  auto res = CMAESOptimizer::run(fit, {1.0, 1.0}, 3000, 42);
+
+  EXPECT_TRUE(std::isfinite(res.best_cost));
+  ASSERT_EQ(res.best_params.size(), 2);
+  EXPECT_LT(res.best_cost, 100.0);
+}
+
+TEST_F(CMAESOptimizerTest, twenty_params_quadratic) {
+  const int dim = 20;
+  std::mt19937 rng(123);
+  std::normal_distribution<> nd(0.0, 1.0);
+
+  Eigen::MatrixXd A(dim, dim);
+  for (int i = 0; i < dim; ++i)
+    for (int j = 0; j < dim; ++j)
+      A(i, j) = nd(rng);
+  Eigen::MatrixXd H = A.transpose() * A
+                    + 0.1 * Eigen::MatrixXd::Identity(dim, dim);
+
+  Eigen::VectorXd true_x(dim);
+  for (int i = 0; i < dim; ++i) true_x(i) = nd(rng) * 0.5;
+
+  std::function<double(const double*, int)> fit =
+      [&H, &true_x](const double* x, int n) -> double {
+    Eigen::Map<const Eigen::VectorXd> xm(x, n);
+    Eigen::VectorXd d = xm - true_x;
+    return d.transpose() * H * d;
+  };
+
+  auto res = CMAESOptimizer::run(fit, std::vector<double>(dim, 1.0), 10000, 42);
+
+  EXPECT_TRUE(std::isfinite(res.best_cost));
+  ASSERT_EQ(res.best_params.size(), dim);
+
+  Eigen::Map<const Eigen::VectorXd> best(res.best_params.data(), dim);
+  double true_cost = fit(true_x.data(), dim);
+  EXPECT_EQ(true_cost, 0.0);
+  EXPECT_GT(res.best_cost, 0.0);
+
+  // Must beat a random guess drawn from ~[-3, 3]
+  std::vector<double> rnd(dim);
+  for (int i = 0; i < dim; ++i) rnd[i] = nd(rng) * 3.0;
+  double rnd_cost = fit(rnd.data(), dim);
+  EXPECT_LT(res.best_cost, rnd_cost);
+}
+
+TEST_F(CMAESOptimizerTest, different_initial_sigma_similar_result) {
+  std::function<double(const double*, int)> fit =
+      [](const double* x, int) -> double {
+    return x[0]*x[0] + x[1]*x[1] + 5.0;
+  };
+
+  auto r1 = CMAESOptimizer::run(fit, {1.0, 1.0}, 1000, 42);
+  auto r2 = CMAESOptimizer::run(fit, {0.1, 3.0}, 1000, 42);
+
+  EXPECT_TRUE(std::isfinite(r1.best_cost));
+  EXPECT_TRUE(std::isfinite(r2.best_cost));
+  EXPECT_NEAR(r1.best_cost, r2.best_cost, r1.best_cost * 0.5 + 1.0);
 }
 
 // ===========================================================================

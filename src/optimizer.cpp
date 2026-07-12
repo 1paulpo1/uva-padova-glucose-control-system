@@ -17,41 +17,49 @@ namespace uva_padova {
 // CMA-ES wrapper
 // ===========================================================================
 CMAESOptimizer::Result CMAESOptimizer::run(
-    const ObservationCost<>& obs_cost,
+    std::function<double(const double*, int)> fit_func,
     const std::vector<double>& initial_sigma,
     int max_evals,
-    int seed)
+    int seed,
+    double lower_bound,
+    double upper_bound)
 {
-  // Use PriorCost to compute MAP prior for CMA-ES
-  // We build a dummy descriptor vector with matching size
-  // (the actual prior comes from the pipeline's PriorCost)
-  int dim = obs_cost.n_params_;
-
-  // For CMA-ES we need the full scalar cost = observation + prior.
-  // PriorCost is not available here — the pipeline passes it via the fit lambda.
-  // We handle this differently: the pipeline's lambda calls both.
-
-  std::vector<double> x0(dim, 0.0);
+  int dim = static_cast<int>(initial_sigma.size());
 
   std::vector<double> sigma_vec = initial_sigma;
-  if (sigma_vec.empty())
-    sigma_vec.assign(dim, 1.0);
 
-  uint64_t rng_seed = (seed >= 0) ? static_cast<uint64_t>(seed)
-                                   : static_cast<uint64_t>(std::random_device{}());
-  std::vector<double> empty_bounds;
-  libcmaes::CMAParameters<> cmap(x0, sigma_vec, -1, empty_bounds, empty_bounds, rng_seed);
+  if (seed < 0)
+    seed = static_cast<int>(std::random_device{}());
+
+  std::vector<double> x0(dim, 0.0);
+  std::vector<double> lbounds(dim, lower_bound);
+  std::vector<double> ubounds(dim, upper_bound);
+
+  uint64_t rng_seed = static_cast<uint64_t>(seed);
+  libcmaes::CMAParameters<> cmap(x0, sigma_vec, -1,
+                                  lbounds, ubounds, rng_seed);
   cmap.set_algo(CMAES_DEFAULT);
   cmap.set_max_fevals(max_evals);
 
-  // The fit function is passed as a lambda from the pipeline
-  // This run() function is only called with the lambda from IdentificationPipeline::run
-  // which wraps both obs_cost and prior_cost
+  // libcmaes NoBoundStrategy silently discards bounds — enforce them here
+  // by wrapping the fit function with bounds checking
+  libcmaes::FitFunc wrapped_func =
+      [fit_func = std::move(fit_func), lbounds, ubounds](
+          const double* x, const int& n) -> double {
+    for (int i = 0; i < n; ++i)
+      if (x[i] < lbounds[i] || x[i] > ubounds[i])
+        return 1e20;
+    return fit_func(x, n);
+  };
 
-  // Note: this is only called from the pipeline, which uses a custom FitFunc lambda.
-  // The default implementation here is not used directly.
+  libcmaes::CMASolutions cmasols = libcmaes::cmaes(wrapped_func, cmap);
+
+  auto bc = cmasols.best_candidate();
   Result res;
-  res.best_cost = 1e20;
+  res.best_cost = bc.get_fvalue();
+  res.n_evals   = cmasols.fevals();
+  const double* best_x = bc.get_x_ptr();
+  res.best_params.assign(best_x, best_x + dim);
   return res;
 }
 
@@ -218,6 +226,37 @@ LMOptimizer::CovarianceResult LMOptimizer::compute_covariance_at(
   return result;
 }
 
+// ---------------------------------------------------------------------------
+// Ceres Covariance block at arbitrary theta (extracted from Pipeline fallback)
+// ---------------------------------------------------------------------------
+LMOptimizer::CovarianceResult LMOptimizer::compute_covariance(
+    const std::vector<double>& theta,
+    ObservationCost<>& obs_cost,
+    PriorCost& prior_cost)
+{
+  int dim = static_cast<int>(theta.size());
+  if (dim == 0) return {};
+
+  std::vector<double> x = theta;
+
+  ceres::Problem tmp_problem;
+  tmp_problem.AddResidualBlock(&obs_cost, new ceres::SoftLOneLoss(1.0), x.data());
+  tmp_problem.AddResidualBlock(&prior_cost, nullptr, x.data());
+
+  ceres::Covariance::Options cov_opts;
+  ceres::Covariance tmp_cov(cov_opts);
+  std::vector<std::pair<const double*, const double*>> cb = {
+      {x.data(), x.data()}};
+
+  Eigen::MatrixXd cov_mat = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
+  if (tmp_cov.Compute(cb, &tmp_problem)) {
+    cov_mat.resize(dim, dim);
+    tmp_cov.GetCovarianceBlock(x.data(), x.data(), cov_mat.data());
+  }
+
+  return {cov_mat, {}};
+}
+
 // ===========================================================================
 // Identification pipeline
 // ===========================================================================
@@ -248,50 +287,30 @@ IdentificationPipeline::Result IdentificationPipeline::run(
   std::vector<RestartRecord> restart_points;
   restart_points.reserve(n_cmaes_restarts);
 
+  // Build cost + prior into CMA-ES fit function (lambda shared across restarts)
+  std::function<double(const double*, int)> fit_func =
+      [&obs_cost, &prior_cost](const double* x, int n) -> double {
+    (void)n;
+    double fval = obs_cost.compute_scalar_cost(x) + prior_cost.compute_scalar_prior(x);
+    if (!std::isfinite(fval)) return 1e20;
+    return fval;
+  };
+
   for (int restart = 0; restart < n_cmaes_restarts; ++restart) {
-    std::vector<double> x0(dim, 0.0);
+    int seed = static_cast<int>(std::random_device{}());
+    auto cmaes_res = CMAESOptimizer::run(fit_func, initial_sigma, cmaes_evals,
+                                          seed, cmaes_lower, cmaes_upper);
 
-    // Build CMA-ES parameters with random seed
-    // Bounds in log-space
-    uint64_t rng_seed = static_cast<uint64_t>(std::random_device{}());
-    std::vector<double> lbounds(dim, cmaes_lower);
-    std::vector<double> ubounds(dim, cmaes_upper);
-    libcmaes::CMAParameters<> cmap(x0, initial_sigma, -1,
-                                    lbounds, ubounds, rng_seed);
-    cmap.set_algo(CMAES_DEFAULT);
-    cmap.set_max_fevals(cmaes_evals);
-
-    // Wrap cost and prior into CMA-ES FitFunc
-    // libcmaes NoBoundStrategy silently discards bounds, so enforce them here
-    libcmaes::FitFunc fit_func =
-        [&obs_cost, &prior_cost, &lbounds, &ubounds](const double* x, const int& n) -> double {
-      for (int i = 0; i < n; ++i)
-        if (x[i] < lbounds[i] || x[i] > ubounds[i])
-          return 1e20;
-      double fval = obs_cost.compute_scalar_cost(x) + prior_cost.compute_scalar_prior(x);
-      if (!std::isfinite(fval)) return 1e20;
-      return fval;
-    };
-
-    // Run CMA-ES
-    libcmaes::CMASolutions cmasols = libcmaes::cmaes(fit_func, cmap);
-
-    auto bc = cmasols.best_candidate();
-    double restart_cost = bc.get_fvalue();
-    int restart_evals  = cmasols.fevals();
-    const double* best_x = bc.get_x_ptr();
-
-    if (restart_cost < best_cma_cost) {
-      best_cma_cost = restart_cost;
-      best_cma_point.assign(best_x, best_x + dim);
+    if (cmaes_res.best_cost < best_cma_cost) {
+      best_cma_cost = cmaes_res.best_cost;
+      best_cma_point = cmaes_res.best_params;
     }
 
-    // Record every restart's best point for diagnostic gate (a)
-    restart_points.push_back({std::vector<double>(best_x, best_x + dim), restart_cost});
+    restart_points.push_back({cmaes_res.best_params, cmaes_res.best_cost});
 
     std::cout << "  CMA-ES restart " << (restart + 1) << "/"
-              << n_cmaes_restarts << ": cost=" << restart_cost
-              << " fevals=" << restart_evals << "\n";
+              << n_cmaes_restarts << ": cost=" << cmaes_res.best_cost
+              << " fevals=" << cmaes_res.n_evals << "\n";
   }
 
   // ---- LM refinement ---
@@ -327,27 +346,10 @@ IdentificationPipeline::Result IdentificationPipeline::run(
   if (result.success && !result.params.empty()) {
     int dim = obs_cost.n_params_;
     if (lm_res.cov.rows() == dim && result.params == lm_res.final_params) {
-      // LM was used: reuse its Ceres-computed covariance
       result.cov = lm_res.cov;
     } else {
-      // CMA-ES-only or fallback: build temporary Ceres problem for covariance
-      ceres::Problem tmp_problem;
-      tmp_problem.AddResidualBlock(&obs_cost, new ceres::SoftLOneLoss(1.0),
-                                   result.params.data());
-      tmp_problem.AddResidualBlock(&prior_cost, nullptr, result.params.data());
-
-      ceres::Covariance::Options cov_opts;
-      ceres::Covariance tmp_cov(cov_opts);
-      std::vector<std::pair<const double*, const double*>> cb = {
-          {result.params.data(), result.params.data()}};
-
-      Eigen::MatrixXd cov_mat = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
-      if (tmp_cov.Compute(cb, &tmp_problem)) {
-        cov_mat.resize(dim, dim);
-        tmp_cov.GetCovarianceBlock(result.params.data(), result.params.data(),
-                                    cov_mat.data());
-      }
-      result.cov = std::move(cov_mat);
+      auto cov_res = LMOptimizer::compute_covariance(result.params, obs_cost, prior_cost);
+      result.cov = cov_res.cov;
     }
     std::cout << "  [debug] covariance done\n";
   }

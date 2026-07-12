@@ -1,5 +1,6 @@
 #pragma once
 
+#include <functional>
 #include <vector>
 #include <Eigen/Core>
 #include "uva_padova/cost_function.hpp"
@@ -16,10 +17,12 @@ struct CMAESOptimizer {
     int n_evals{0};
   };
 
-  static Result run(const ObservationCost<>& cost,
+  static Result run(std::function<double(const double*, int)> fit_func,
                     const std::vector<double>& initial_sigma,
                     int max_evals = 1000,
-                    int seed = -1);
+                    int seed = -1,
+                    double lower_bound = -3.0,
+                    double upper_bound = 3.0);
 };
 
 // ---------------------------------------------------------------------------
@@ -47,6 +50,12 @@ struct LMOptimizer {
 
   // Retained for reference — unused in auto-mode (Ceres Covariance used instead)
   static CovarianceResult compute_covariance_at(
+      const std::vector<double>& theta,
+      ObservationCost<>& obs_cost,
+      PriorCost& prior_cost);
+
+  // Ceres Covariance block at an arbitrary point (replaces Pipeline inline fallback)
+  static CovarianceResult compute_covariance(
       const std::vector<double>& theta,
       ObservationCost<>& obs_cost,
       PriorCost& prior_cost);

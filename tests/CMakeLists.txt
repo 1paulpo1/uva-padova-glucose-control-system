@@ -1,3 +1,35 @@
+# ===========================================================================
+# Unit tests for core library (with MockSimulator)
+# ===========================================================================
+add_executable(unit_core
+  unit/adjustments_test.cpp
+  unit/prior_cost_test.cpp
+  unit/observation_cost_test.cpp
+)
+target_link_libraries(unit_core PRIVATE uva_padova_core Ceres::ceres GTest::gtest GTest::gtest_main)
+target_include_directories(unit_core PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_link_options(unit_core PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
+
+# ===========================================================================
+# Integration tests for identification library (with real ODE)
+# ===========================================================================
+add_executable(unit_id
+  integration/observation_cost_integration_test.cpp
+)
+target_link_libraries(unit_id PRIVATE uva_padova_id GTest::gtest GTest::gtest_main)
+target_include_directories(unit_id PRIVATE ${CMAKE_SOURCE_DIR}/tests)
+target_link_options(unit_id PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
+
+# ===========================================================================
+# Register gtest-based tests with CTest
+# ===========================================================================
+include(GoogleTest)
+gtest_discover_tests(unit_core)
+gtest_discover_tests(unit_id)
+
+# ===========================================================================
+# Existing integration/experiment executables (unchanged)
+# ===========================================================================
 add_executable(test_odesystem test_odesystem.cpp)
 target_link_libraries(test_odesystem PRIVATE uva_padova_core)
 target_include_directories(test_odesystem PRIVATE ${CMAKE_SOURCE_DIR}/include)

@@ -1,0 +1,362 @@
+#include <gtest/gtest.h>
+#include <cmath>
+#include <vector>
+
+#include "uva_padova/cost_function.hpp"
+#include "mocks/mock_simulator.h"
+#include "test_data/synthetic_data.h"
+
+using namespace uva_padova;
+
+// ---------------------------------------------------------------------------
+//  Death test: n_params_ > kMaxJetDim → std::abort
+// ---------------------------------------------------------------------------
+TEST(ObservationCostDeathTest, too_many_params) {
+  std::vector<ParamDescriptor> descs(31, ParamDescriptor{"x"});
+  IdentificationData d;
+  d.finalize();
+  EXPECT_DEATH({ ObservationCost<MockSimulator> cost(d, Params{}, descs); }, "");
+}
+
+// ---------------------------------------------------------------------------
+//  Empty data: no CGM observations → total_min = 0, Evaluate OK
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, empty_data) {
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  auto data = make_id_data(0, {});
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  EXPECT_EQ(cost.n_obs_, 0);
+  EXPECT_EQ(data.total_min(), 0);
+  EXPECT_EQ(cost.num_residuals(), 0);
+
+  std::vector<double> theta = {0.0};
+  std::vector<double> residuals;
+  const double* ptr = theta.data();
+  EXPECT_TRUE(cost.Evaluate(&ptr, nullptr, nullptr));
+  EXPECT_EQ(cost.eval_count(), 1);
+}
+
+// ---------------------------------------------------------------------------
+//  Basic Evaluate: no Jacobians requested (double path)
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, evaluate_no_jacobian) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::basal_insulin = 1.0;
+
+  auto data = make_id_data(60, {0.0, 30.0, 60.0}, {}, {}, {}, {}, 120.0);
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> theta = {0.0};
+  std::vector<double> residuals(cost.n_obs_);
+  const double* ptr = theta.data();
+  EXPECT_TRUE(cost.Evaluate(&ptr, residuals.data(), nullptr));
+
+  // Since Gsc stays at 100.0 (identity dyn) and obs = 120.0:
+  // r = (100 - 120) / 2.9 = -6.89655...
+  double expected = (100.0 - 120.0) / 2.9;
+  for (int i = 0; i < cost.n_obs_; ++i)
+    EXPECT_NEAR(residuals[i], expected, 1e-10);
+
+  // Mock should have been called total_min times
+  EXPECT_EQ(MockSimulator::step_count, 60);
+}
+
+// ---------------------------------------------------------------------------
+//  Evaluate with Jacobians: Jet path
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, evaluate_with_jacobian) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::basal_insulin = 1.0;
+
+  auto data = make_id_data(10, {0.0, 10.0}, {}, {}, {}, {}, 120.0);
+  std::vector<ParamDescriptor> descs = {{"kp1"}, {"kp2"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> theta = {0.0, 0.0};
+  std::vector<double> residuals(cost.n_obs_);
+  std::vector<double> J_buf(cost.n_obs_ * cost.n_params_);
+  double* ptrs[] = {J_buf.data()};
+  const double* tptr = theta.data();
+  EXPECT_TRUE(cost.Evaluate(&tptr, residuals.data(), ptrs));
+
+  // With MockSimulator, steady state derivatives are 0 (fixed SS)
+  // and step is identity for Jet, so Gsc derivative = 0
+  for (int i = 0; i < cost.n_obs_; ++i) {
+    for (int j = 0; j < cost.n_params_; ++j) {
+      EXPECT_DOUBLE_EQ(J_buf[i * cost.n_params_ + j], 0.0);
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  compute_scalar_cost: matches manual formula
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, scalar_cost) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+
+  auto data = make_id_data(10, {0.0, 10.0}, {}, {}, {}, {}, 120.0);
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> theta = {0.0};
+
+  // r = (100 - 120) / 2.9
+  double r = (100.0 - 120.0) / 2.9;
+  double expected_per_obs = 2.0 * (std::sqrt(1.0 + r * r) - 1.0);
+  double expected = expected_per_obs * cost.n_obs_;
+
+  EXPECT_NEAR(cost.compute_scalar_cost(theta.data()), expected, 1e-10);
+}
+
+// ---------------------------------------------------------------------------
+//  scalar_cost is zero when all residuals are zero
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, scalar_cost_zero) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 120.0;  // Matches cgm_value_fill in make_id_data
+
+  auto data = make_id_data(10, {0.0, 5.0, 10.0}, {}, {}, {}, {}, 120.0);
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> theta = {0.0};
+  EXPECT_NEAR(cost.compute_scalar_cost(theta.data()), 0.0, 1e-10);
+}
+
+// ---------------------------------------------------------------------------
+//  simulate_observations: basic identity dynamics
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, simulate_identity) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::basal_insulin = 1.0;
+
+  auto data = make_id_data(60, {0.0, 30.0, 60.0});
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> theta = {0.0};
+  auto cgm = cost.simulate_observations<double>(theta.data());
+
+  ASSERT_EQ(cgm.size(), 3);
+  EXPECT_NEAR(cgm[0], 100.0, 1e-10);
+  EXPECT_NEAR(cgm[1], 100.0, 1e-10);
+  EXPECT_NEAR(cgm[2], 100.0, 1e-10);
+}
+
+// ---------------------------------------------------------------------------
+//  simulate_observations: single meal event at t=30
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, simulate_with_meal) {
+  MockSimulator::reset();
+  MockSimulator::ss_state = State{};
+  MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::basal_insulin = 1.0;
+
+  // When mealD > 0, step adds a bit to Gsc so we can detect the meal
+  // using the step_delta callback.  But step_delta only gets params,
+  // not state.  Instead, we count steps — the meal doesn't affect step
+  // count, but we verify that simulation runs without error and produces
+  // the right number of outputs at the right times.
+  MockSimulator::step_delta = [](const BasicParams<double>&) { return 0.1; };
+
+  // Observations at t=0 (before meal), t=30 (same moment as meal),
+  // t=60 (after meal).  According to the simulation loop:
+  //   - t=0:  record Gsc (100.0), then step (→100.1)
+  //   - t=1..29: step each minute
+  //   - t=30: apply meal (Qsto1 += 50000, mealD=50000), record Gsc (after 29 steps
+  //            of step_delta = 100.0 + 29*0.1 = 102.9, then step → 103.0)
+  // Wait — step order: at t=30, first apply meal, THEN record CGM, THEN step
+  // So recorded Gsc at t=30 is BEFORE the step at this iteration.
+  // After 29 steps (t=0..28): Gsc = 100.0 + 29*0.1 = 102.9
+  // At t=29: step → Gsc = 103.0
+  // At t=30: apply meal, then record Gsc = 103.0, then step → 103.1
+  
+  auto data = make_id_data(60, {0.0, 30.0, 60.0},
+                           {30.0}, {50000.0});
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> theta = {0.0};
+  auto cgm = cost.simulate_observations<double>(theta.data());
+
+  ASSERT_EQ(cgm.size(), 3);
+  // t=0: recorded before any step
+  EXPECT_NEAR(cgm[0], 100.0, 1e-10);
+  // t=30: after 30 steps (t=0..29) = 100.0 + 30*0.1 = 103.0
+  // Actually at t=0: after recording, step → 100.1
+  // t=1: step → 100.2
+  // ...
+  // t=29: record at t=0 doesn't happen again; step at t=29: 100.0 + 30*0.1 = 103.0
+  // Let me recount: steps happen at t=0,1,2,...,59 (total 60 steps if total_min=60)
+  // At t=0: record (100.0), then step (→100.1) — step 1
+  // At t=1: step (→100.2) — step 2
+  // ...
+  // At t=29: step (→103.0) — step 30
+  // At t=30: record (103.0), then step (→103.1) — step 31
+  // At t=59: step (→109.0) — step 60
+  // At t=60: record (109.0), loop ends — no step at t=60 since t < total_min = false
+  
+  // Actually wait, the loop is: for t = 0..total_min inclusive.
+  // Step is: if (t < data_.total_min()) Simulator::step(...)
+  // So steps happen at t=0,1,...,total_min-1 = 0..59 (60 steps)
+  
+  // By t=30 (before step at t=30), we've done steps at t=0..29 = 30 steps
+  // Gsc = 100.0 + 30*0.1 = 103.0
+  EXPECT_NEAR(cgm[1], 103.0, 1e-10);
+  
+  // By t=60 (before step at t=60 — but step doesn't happen since t=60 == total_min)
+  // Steps done: t=0..59 = 60 steps
+  // Gsc = 100.0 + 60*0.1 = 106.0
+  // At t=60: record, loop ends
+  EXPECT_NEAR(cgm[2], 106.0, 1e-10);
+}
+
+// ---------------------------------------------------------------------------
+//  Time rounding: cgm_time with fractional minutes
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, time_rounding) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::basal_insulin = 1.0;
+  MockSimulator::step_delta = [](const BasicParams<double>&) { return 1.0; };
+
+  // Times: 0.49 rounds to 0, 1.51 rounds to 2
+  auto data = make_id_data(5, {0.49, 1.51});
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> theta = {0.0};
+  auto cgm = cost.simulate_observations<double>(theta.data());
+
+  ASSERT_EQ(cgm.size(), 2);
+  // t=0: record at 0.49, rounded to 0 → 0 steps yet
+  EXPECT_NEAR(cgm[0], 100.0, 1e-10);
+  // t=2: record at 1.51, rounded to 2 → after 2 steps (t=0,1)
+  // Gsc = 100.0 + 2*1.0 = 102.0
+  EXPECT_NEAR(cgm[1], 102.0, 1e-10);
+}
+
+// ---------------------------------------------------------------------------
+//  Observation outside simulation window: obs_t beyond total_min
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, observation_outside_window) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+
+  // total_min is derived from cgm_time.back(): 10 minutes
+  auto data = make_id_data(10, {5.0, 20.0});  // 20 > total_min
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  EXPECT_EQ(data.total_min(), 20);
+
+  std::vector<double> theta = {0.0};
+  auto cgm = cost.simulate_observations<double>(theta.data());
+  // Both observations should be recorded since total_min extends to cover
+  // the max of cgm_time.back() (via finalize).
+  ASSERT_EQ(cgm.size(), 2);
+}
+
+// ---------------------------------------------------------------------------
+//  Gradient check: analytical Jet Jacobian vs finite differences
+//  Uses LinearMockSimulator for predictable differentiable dynamics
+// ---------------------------------------------------------------------------
+TEST(ObservationCostGradientTest, finite_difference_check) {
+  LinearMockSimulator::reset();
+  LinearMockSimulator::ss_state.Gsc = 100.0;
+  LinearMockSimulator::basal_insulin = 1.0;
+
+  const int total_min = 30;
+  auto data = make_id_data(total_min, {0.0, 15.0, 30.0},
+                           {}, {}, {}, {}, 120.0);
+
+  // We'll adjust two params: kp1 and VG (to have multiple active params)
+  std::vector<ParamDescriptor> descs = {{"kp1"}, {"VG"}};
+  Params base = Params::defaults_t1d();
+
+  ObservationCost<LinearMockSimulator> cost(data, base, descs);
+
+  std::vector<double> theta = {0.1, -0.05};  // arbitrary test point
+
+  // --- Analytical Jacobian via Evaluate ---
+  std::vector<double> residuals(cost.n_obs_);
+  std::vector<double> J_ana(cost.n_obs_ * cost.n_params_);
+  double* J_ptrs[] = {J_ana.data()};
+  const double* tptr = theta.data();
+  ASSERT_TRUE(cost.Evaluate(&tptr, residuals.data(), J_ptrs));
+
+  // --- Finite-difference Jacobian (central differences, O(eps^2)) ---
+  const double eps = 1e-6;
+  auto fd_sim = [&](const double* th) {
+    return cost.simulate_observations<double>(th);
+  };
+
+  std::vector<double> J_fd(cost.n_obs_ * cost.n_params_, 0.0);
+
+  for (int j = 0; j < cost.n_params_; ++j) {
+    std::vector<double> th_lo = theta;
+    th_lo[j] -= eps;
+    std::vector<double> th_hi = theta;
+    th_hi[j] += eps;
+    auto cgm_lo = fd_sim(th_lo.data());
+    auto cgm_hi = fd_sim(th_hi.data());
+
+    for (int i = 0; i < cost.n_obs_; ++i) {
+      // Central difference: dr/dθ ≈ (r(θ+ε) − r(θ−ε)) / (2ε)
+      double r_lo = (cgm_lo[i] - data.cgm_value[i]) / cost.sigma_;
+      double r_hi = (cgm_hi[i] - data.cgm_value[i]) / cost.sigma_;
+      J_fd[i * cost.n_params_ + j] = (r_hi - r_lo) / (2.0 * eps);
+    }
+  }
+
+  // Compare
+  const double tol = 1e-6;
+  for (int i = 0; i < cost.n_obs_; ++i) {
+    for (int j = 0; j < cost.n_params_; ++j) {
+      EXPECT_NEAR(J_ana[i * cost.n_params_ + j],
+                  J_fd[i * cost.n_params_ + j], tol)
+          << " at obs=" << i << " param=" << j;
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  compute_raw_gradients returns matching Jacobian
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, raw_gradients_match_evaluate) {
+  LinearMockSimulator::reset();
+  LinearMockSimulator::ss_state.Gsc = 100.0;
+  LinearMockSimulator::basal_insulin = 1.0;
+
+  auto data = make_id_data(20, {0.0, 10.0, 20.0});
+  std::vector<ParamDescriptor> descs = {{"kp1"}, {"Vm0"}};
+  ObservationCost<LinearMockSimulator> cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> theta = {0.2, -0.1};
+
+  // Evaluate with Jacobian
+  std::vector<double> r1(cost.n_obs_);
+  std::vector<double> J1(cost.n_obs_ * cost.n_params_);
+  double* J1p[] = {J1.data()};
+  const double* tp = theta.data();
+  cost.Evaluate(&tp, r1.data(), J1p);
+
+  // compute_raw_gradients
+  std::vector<double> r2;
+  Eigen::MatrixXd J2;
+  cost.compute_raw_gradients(theta.data(), r2, J2);
+
+  ASSERT_EQ(r2.size(), r1.size());
+  for (int i = 0; i < cost.n_obs_; ++i)
+    EXPECT_NEAR(r2[i], r1[i], 1e-12);
+
+  for (int i = 0; i < cost.n_obs_; ++i)
+    for (int j = 0; j < cost.n_params_; ++j)
+      EXPECT_NEAR(J2(i, j), J1[i * cost.n_params_ + j], 1e-12);
+}

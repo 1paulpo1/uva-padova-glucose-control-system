@@ -23,6 +23,9 @@ if(NOT TARGET gflags)
 endif()
 find_package(Ceres REQUIRED)
 
+find_package(GTest REQUIRED)
+enable_testing()
+
 find_package(libcmaes REQUIRED)
 
 # nlohmann/json (header-only, zero-dependency)

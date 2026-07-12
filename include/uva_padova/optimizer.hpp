@@ -50,9 +50,10 @@ struct LMOptimizer {
                     int max_iters = 100);
 
   // Retained for reference — unused in auto-mode (Ceres Covariance used instead)
+  template <typename Simulator = UvaPadovaSimulator>
   static CovarianceResult compute_covariance_at(
       const std::vector<double>& theta,
-      ObservationCost<>& obs_cost,
+      ObservationCost<Simulator>& obs_cost,
       PriorCost& prior_cost);
 
   // Ceres Covariance block at an arbitrary point (replaces Pipeline inline fallback)

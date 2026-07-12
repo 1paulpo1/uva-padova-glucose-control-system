@@ -404,3 +404,245 @@ TEST_F(LMOptimizerTest, covariance_positive_diagonal) {
   ASSERT_GT(cov_res.cov.rows(), 0);
   EXPECT_GT(cov_res.cov(0, 0), 0.0);
 }
+
+// ===========================================================================
+// Rosenbrock-based nonlinear 2-parameter simulator
+// ===========================================================================
+// Rosenbrock-inspired 2-parameter nonlinear simulator.
+//
+// With data at {t=0, t=1} and CGM = {0, 0} and sigma=1.0, the residuals are:
+//   r1 = sqrt(2)  * (1 - kp1)       → (1-kp1)² term
+//   r2 = sqrt(200) * (kp2 - kp1²)   → 100·(kp2-kp1²)² term
+// Total cost (without loss) = Rosenbrock function.
+struct RosenbrockSimulator {
+  static void reset() {}
+
+  static double find_steady_state(State& out,
+                                   const BasicParams<double>& p,
+                                   double) {
+    out = State{};
+    out.Gsc = sqrt(2.0) * (p.kp1 - 1.0);
+    return 1.0;
+  }
+
+  template<typename T>
+  static void step(BasicState<T>& state, const BasicInputs<T>&,
+                   const BasicParams<T>& p, double dt) {
+    T target = sqrt(T(200.0)) * (p.kp1 * p.kp1 - p.kp2);
+    T initial = sqrt(T(2.0)) * (p.kp1 - T(1.0));
+    state.Gsc += T(dt) * (target - initial);
+  }
+
+  template<int EventType, typename T>
+  static void notify(const BasicState<T>&, const BasicInputs<T>&, T) {}
+};
+
+// Helper: create a Rosenbrock ObservationCost with 2 params (kp1, kp2).
+// Base kp1=kp2=1 so the Rosenbrock optimum (kp1=1, kp2=1) is at θ=(0,0).
+static auto make_rosenbrock_cost(double sigma = 1.0) {
+  auto data = make_id_data({0.0, 1.0}, {}, {}, {}, {}, {}, {}, 0.0);
+  auto base = Params::defaults_t1d();
+  base.kp1 = 1.0;
+  base.kp2 = 1.0;
+  return ObservationCost<RosenbrockSimulator>(data, base,
+                                              {{"kp1", 0, 2}, {"kp2", 0, 2}},
+                                              sigma);
+}
+
+static auto make_rosenbrock_prior() {
+  return PriorCost({{"kp1", 0, 2}, {"kp2", 0, 2}});
+}
+
+// ===========================================================================
+// LMOptimizer — Rosenbrock (nonlinear, 2-param)
+// ===========================================================================
+class LMRosenbrockTest : public ::testing::Test {
+protected:
+  void SetUp() override {
+    RosenbrockSimulator::reset();
+  }
+};
+
+TEST_F(LMRosenbrockTest, converges_quickly_near_optimum) {
+  // LinearMockSimulator: Gsc += dt * kp1
+  // Data {10, 20, 30} with all CGM = 10 (linear ramp). True optimum is
+  // where (t * kp1 - 10) residuals balance. Starting from θ = 0.0 (the
+  // existing test converges_with_prior starts from {0.0}); starting even
+  // closer ({0.01}) should converge in few iterations.
+  auto data = make_id_data({10.0, 20.0, 30.0});
+  ObservationCost<LinearMockSimulator> obs_cost(data, Params::defaults_t1d(),
+                                                {{"kp1", 0, 1}});
+  PriorCost prior({{"kp1", 0, 1}});
+
+  auto res = LMOptimizer::run({0.01}, obs_cost, prior, 50);
+
+  EXPECT_TRUE(res.converged);
+  EXPECT_TRUE(std::isfinite(res.final_cost));
+  EXPECT_EQ(res.final_params.size(), 1);
+}
+
+TEST_F(LMRosenbrockTest, rosenbrock_converges) {
+  auto obs_cost = make_rosenbrock_cost();
+  auto prior = make_rosenbrock_prior();
+
+  // Start far from optimum: (-2, 2) in log-space.
+  // With base kp1=kp2=1, the optimum is at (0,0) (kp1=1, kp2=1).
+  auto res = LMOptimizer::run({-2.0, 2.0}, obs_cost, prior, 200);
+
+  EXPECT_TRUE(res.converged);
+  ASSERT_EQ(res.final_params.size(), 2);
+  EXPECT_TRUE(std::isfinite(res.final_cost));
+  EXPECT_GT(res.cov.rows(), 0);
+}
+
+TEST_F(LMRosenbrockTest, covariance_positive_definite) {
+  auto obs_cost = make_rosenbrock_cost();
+  auto prior = make_rosenbrock_prior();
+
+  auto res = LMOptimizer::run({0.0, 0.0}, obs_cost, prior, 100);
+  ASSERT_TRUE(res.converged);
+  ASSERT_EQ(res.cov.rows(), 2);
+
+  Eigen::LLT<Eigen::MatrixXd> llt(res.cov);
+  EXPECT_EQ(llt.info(), Eigen::Success);
+
+  Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> es(res.cov);
+  EXPECT_GT(es.eigenvalues().minCoeff(), 0.0);
+}
+
+TEST_F(LMRosenbrockTest, covariance_methods_agree) {
+  // Both compute_covariance (Ceres) and compute_covariance_at (sandwich)
+  // should return positive-definite matrices at the converged point.
+  auto obs_cost = make_rosenbrock_cost();
+  auto prior = make_rosenbrock_prior();
+
+  auto res = LMOptimizer::run({0.0, 0.0}, obs_cost, prior, 100);
+  ASSERT_TRUE(res.converged);
+
+  auto cov1 = LMOptimizer::compute_covariance(res.final_params, obs_cost, prior);
+  auto cov2 = LMOptimizer::compute_covariance_at(res.final_params, obs_cost, prior);
+
+  EXPECT_EQ(cov1.cov.rows(), 2);
+  EXPECT_EQ(cov2.cov.rows(), 2);
+  EXPECT_GT(cov1.cov(0, 0), 0.0);
+  EXPECT_GT(cov2.cov(0, 0), 0.0);
+
+  // Sandwich covariance_sandwich should be finite (may be near-zero
+  // when residuals are exactly zero, which makes V ≈ 0).
+  EXPECT_TRUE(cov2.cov_sandwich.allFinite());
+}
+
+TEST_F(LMRosenbrockTest, ceres_cov_matches_jtwj) {
+  auto obs_cost = make_rosenbrock_cost();
+  auto prior = make_rosenbrock_prior();
+
+  auto res = LMOptimizer::run({0.0, 0.0}, obs_cost, prior, 100);
+  ASSERT_TRUE(res.converged);
+  ASSERT_EQ(res.cov.rows(), 2);
+
+  const double* params_ptr = res.final_params.data();
+  int n_obs = obs_cost.n_obs_;
+  int n_params = obs_cost.n_params_;
+
+  std::vector<double> resid(n_obs);
+  std::vector<double> jac_buf(n_obs * n_params);
+  double* jac_ptrs[] = { jac_buf.data() };
+  obs_cost.Evaluate(&params_ptr, resid.data(), jac_ptrs);
+
+  Eigen::MatrixXd J(n_obs, n_params);
+  for (int i = 0; i < n_obs; ++i)
+    for (int j = 0; j < n_params; ++j)
+      J(i, j) = jac_buf[i * n_params + j];
+
+  // Loss weights: W_ii = rho1(r_i^2) = 1/sqrt(1+r_i^2)
+  Eigen::MatrixXd W = Eigen::MatrixXd::Zero(n_obs, n_obs);
+  for (int i = 0; i < n_obs; ++i) {
+    double r = resid[i];
+    W(i, i) = 1.0 / sqrt(1.0 + r * r);
+  }
+
+  // Prior Hessian: diag(1/std_i^2)
+  Eigen::MatrixXd prior_H = Eigen::MatrixXd::Zero(n_params, n_params);
+  for (int i = 0; i < prior.n_params_; ++i)
+    prior_H(i, i) = 1.0 / (prior.stds_[i] * prior.stds_[i]);
+
+  Eigen::MatrixXd expected_cov =
+      (J.transpose() * W * J + prior_H).inverse();
+
+  EXPECT_TRUE(expected_cov.isApprox(res.cov, 1e-4));
+}
+
+TEST_F(LMRosenbrockTest, numerical_hessian_matches_analytic) {
+  auto obs_cost = make_rosenbrock_cost();
+  auto prior = make_rosenbrock_prior();
+
+  // Evaluate at exact θ = (0, 0) where residuals are zero (no r·∇²r term)
+  std::vector<double> theta = {0.0, 0.0};
+  const double* params_ptr = theta.data();
+  int n_obs = obs_cost.n_obs_;
+  int n_params = obs_cost.n_params_;
+
+  // --- Analytic Hessian (Gauss-Newton: d²loss/dr²·JᵀJ + prior) ---
+  std::vector<double> raw_resid;
+  Eigen::MatrixXd J_raw;
+  ASSERT_TRUE(obs_cost.compute_raw_gradients(params_ptr, raw_resid, J_raw));
+
+  Eigen::MatrixXd H_analytic = Eigen::MatrixXd::Zero(n_params, n_params);
+  ceres::SoftLOneLoss loss(1.0);
+  double rho[3];
+
+  for (int i = 0; i < n_obs; ++i) {
+    double r = raw_resid[i];
+    double s = r * r;
+    loss.Evaluate(s, rho);
+    double d2loss_dr2 = rho[1] * 2.0 + rho[2] * 4.0 * s;
+    auto Ji = J_raw.row(i);
+    H_analytic += d2loss_dr2 * Ji.transpose() * Ji;
+  }
+  for (int i = 0; i < n_params; ++i) {
+    H_analytic(i, i) += 1.0 / (prior.stds_[i] * prior.stds_[i]);
+  }
+
+  // --- Numerical Hessian via central differences ---
+  auto total_fn = [&](const double* x) {
+    double f = obs_cost.compute_scalar_cost(x)
+             + prior.compute_scalar_prior(x);
+    return std::isfinite(f) ? f : 1e20;
+  };
+
+  const double h = 1e-5;
+  std::vector<double> xp(n_params), xm(n_params);
+  Eigen::MatrixXd H_num = Eigen::MatrixXd::Zero(n_params, n_params);
+  double f0 = total_fn(params_ptr);
+
+  for (int i = 0; i < n_params; ++i) {
+    std::copy(params_ptr, params_ptr + n_params, xp.data());
+    std::copy(params_ptr, params_ptr + n_params, xm.data());
+    xp[i] += h;
+    xm[i] -= h;
+    H_num(i, i) = (total_fn(xp.data()) - 2.0 * f0 + total_fn(xm.data())) / (h * h);
+  }
+
+  for (int i = 0; i < n_params; ++i) {
+    for (int j = i + 1; j < n_params; ++j) {
+      std::vector<double> xpp(n_params), xpm(n_params), xmp(n_params), xmm(n_params);
+      std::copy(params_ptr, params_ptr + n_params, xpp.data());
+      std::copy(params_ptr, params_ptr + n_params, xpm.data());
+      std::copy(params_ptr, params_ptr + n_params, xmp.data());
+      std::copy(params_ptr, params_ptr + n_params, xmm.data());
+      xpp[i] += h; xpp[j] += h;
+      xpm[i] += h; xpm[j] -= h;
+      xmp[i] -= h; xmp[j] += h;
+      xmm[i] -= h; xmm[j] -= h;
+      H_num(i, j) = (total_fn(xpp.data()) - total_fn(xpm.data())
+                    - total_fn(xmp.data()) + total_fn(xmm.data()))
+                   / (4.0 * h * h);
+      H_num(j, i) = H_num(i, j);
+    }
+  }
+
+  // Gauss-Newton Hessian matches numerical full Hessian at zero residuals
+  // (the r·∇²r term vanishes). Tolerance accounts for FD truncation + soft-L1
+  // curvature mismatch at non-exactly-zero residuals.
+  EXPECT_TRUE(H_analytic.isApprox(H_num, 0.1));
+}

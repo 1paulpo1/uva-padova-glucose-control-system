@@ -108,6 +108,83 @@ LMOptimizer::CovarianceResult LMOptimizer::compute_covariance(
   return {cov_mat, {}};
 }
 
+template <typename Simulator>
+LMOptimizer::CovarianceResult LMOptimizer::compute_covariance_at(
+    const std::vector<double>& theta,
+    ObservationCost<Simulator>& obs_cost,
+    PriorCost& prior_cost)
+{
+  const int n_obs = obs_cost.n_obs_;
+  const int n_params = obs_cost.n_params_;
+  const int total_res = n_obs + prior_cost.n_params_;
+  const double* params_ptr = theta.data();
+
+  Eigen::MatrixXd J_full(total_res, n_params);
+
+  std::vector<double> obs_resid(n_obs);
+  std::vector<double> obs_jac_buf(n_obs * n_params);
+  double* obs_jac_ptrs[] = { obs_jac_buf.data() };
+  obs_cost.Evaluate(&params_ptr, obs_resid.data(), obs_jac_ptrs);
+  for (int i = 0; i < n_obs; ++i)
+    for (int j = 0; j < n_params; ++j)
+      J_full(i, j) = obs_jac_buf[i * n_params + j];
+
+  std::vector<double> prior_resid(prior_cost.n_params_);
+  std::vector<double> prior_jac_buf(prior_cost.n_params_ * n_params);
+  double* prior_jac_ptrs[] = { prior_jac_buf.data() };
+  prior_cost.Evaluate(&params_ptr, prior_resid.data(), prior_jac_ptrs);
+  for (int i = 0; i < prior_cost.n_params_; ++i)
+    for (int j = 0; j < n_params; ++j)
+      J_full(n_obs + i, j) = prior_jac_buf[i * n_params + j];
+
+  constexpr double kReg = 1e-12;
+  Eigen::MatrixXd FIM = J_full.transpose() * J_full;
+  Eigen::MatrixXd cov = (FIM + kReg * Eigen::MatrixXd::Identity(n_params, n_params)).inverse();
+
+  std::vector<double> raw_resid;
+  Eigen::MatrixXd J_raw;
+  bool ok = obs_cost.compute_raw_gradients(theta.data(), raw_resid, J_raw);
+
+  CovarianceResult result;
+  if (!ok) {
+    std::cerr << "  [sandwich] compute_raw_gradients failed (NaN in simulation); "
+              << "returning prior-only covariance\n";
+    result.cov = cov;
+    result.cov_sandwich = cov;
+    return result;
+  }
+
+  Eigen::MatrixXd H = Eigen::MatrixXd::Zero(n_params, n_params);
+  Eigen::MatrixXd V = Eigen::MatrixXd::Zero(n_params, n_params);
+
+  ceres::SoftLOneLoss loss(1.0);
+  double rho[3];
+
+  for (int i = 0; i < n_obs; ++i) {
+    double r   = raw_resid[i];
+    double s   = r * r;
+    loss.Evaluate(s, rho);
+    double drho_dr   = rho[1] * 2.0 * r;
+    double d2rho_dr2 = rho[1] * 2.0 + rho[2] * 4.0 * s;
+    Eigen::Matrix<double, 1, Eigen::Dynamic> g = J_raw.row(i);
+    H += d2rho_dr2 * g.transpose() * g;
+    V += (drho_dr * drho_dr) * g.transpose() * g;
+  }
+
+  for (int i = 0; i < n_params; ++i) {
+    double iv = 1.0 / (prior_cost.stds_[i] * prior_cost.stds_[i]);
+    H(i, i) += iv;
+  }
+
+  Eigen::MatrixXd H_reg  = H + kReg * Eigen::MatrixXd::Identity(n_params, n_params);
+  Eigen::MatrixXd H_inv  = H_reg.inverse();
+  Eigen::MatrixXd cov_sandwich = H_inv * V * H_inv;
+
+  result.cov          = std::move(cov);
+  result.cov_sandwich = std::move(cov_sandwich);
+  return result;
+}
+
 // ===========================================================================
 // Pipeline: CMA-ES (×N restarts) → LM → top result
 // ===========================================================================

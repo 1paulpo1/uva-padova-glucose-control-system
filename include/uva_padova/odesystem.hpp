@@ -188,16 +188,15 @@ struct UvaPadovaODESystem {
   template<typename T>
   static T risk_factor(const T& G_mgdl, const T& Gb,
                         const T& Gth, const T& r1) {
-    using std::log; using std::pow;
+    using std::log;
     if (r1 == T(0)) return T(0);
     if (G_mgdl >= Gb) return T(0);
     T G_safe = (G_mgdl > T(1e-3)) ? G_mgdl : T(1e-3);
-    T r2 = T(2);
     T ratio = log(G_safe / Gb);
-    T f_val = pow(ratio, r2);
+    T f_val = ratio * ratio;
     if (G_mgdl < Gth) {
       T ratio_th = log(Gth / Gb);
-      f_val = pow(ratio_th, r2);
+      f_val = ratio_th * ratio_th;
     }
     return T(10) * f_val * f_val;
   }

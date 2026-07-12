@@ -23,7 +23,6 @@ if(NOT TARGET gflags)
 endif()
 find_package(Ceres REQUIRED)
 
-find_package(NLopt REQUIRED)
 find_package(libcmaes REQUIRED)
 
 # nlohmann/json (header-only, zero-dependency)
@@ -73,7 +72,7 @@ target_link_libraries(uva_padova_core
     Eigen3::Eigen
 )
 
-# Identification library (Ceres, NLopt, libcmaes)
+# Identification library (Ceres, libcmaes)
 add_library(uva_padova_id
   src/optimizer.cpp
   src/diagnostics.cpp
@@ -91,7 +90,6 @@ target_link_libraries(uva_padova_id
   PUBLIC
     uva_padova_core
     ${CERES_LIBRARIES}
-    NLopt::nlopt
     libcmaes::cmaes
     nlohmann_json::nlohmann_json
 )

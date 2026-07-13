@@ -452,6 +452,163 @@ def print_summary_table(data: dict):
     print(f"\nTotal patients: {len(results)} | Successful identifications: {n_success}\n")
 
 
+def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
+    """CGM observed vs predicted + residuals for patients with lowest cost."""
+    results = [r for r in data["results"] if r["success"] and "cgm_residuals" in r]
+    if not results:
+        return
+    results.sort(key=lambda r: r["cost"])
+    n_plot = min(max_patients, len(results))
+
+    for idx in range(n_plot):
+        r = results[idx]
+        n_obs = len(r["cgm_residuals"])
+
+        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 6), sharex=True)
+
+        # Reconstruct predicted from residuals
+        cgm_obs = r.get("cgm_observed", None)
+        if cgm_obs is None and "theta_true" in r:
+            cgm_obs = [0] * n_obs  # placeholder
+
+        res_min = min(r["cgm_residuals"])
+        res_max = max(r["cgm_residuals"])
+        bound = max(abs(res_min), abs(res_max)) * 1.2
+
+        time_hr = [i * 5 / 60 for i in range(n_obs)]
+
+        ax1.axhline(0, color="gray", linewidth=0.3)
+        ax1.fill_between(time_hr, 0, r["cgm_residuals"],
+                         where=np.array(r["cgm_residuals"]) >= 0,
+                         color="red", alpha=0.3, label="Overestimate")
+        ax1.fill_between(time_hr, 0, r["cgm_residuals"],
+                         where=np.array(r["cgm_residuals"]) < 0,
+                         color="blue", alpha=0.3, label="Underestimate")
+        ax1.plot(time_hr, r["cgm_residuals"], color="black", linewidth=0.5)
+        ax1.set_ylabel("Residual (observed − predicted) [mg/dL]")
+        ax1.set_ylim(-bound, bound)
+        ax1.set_title(f"Patient {r['patient_id']}: CGM residuals (cost={r['cost']:.4f})")
+        ax1.legend(fontsize=7)
+        ax1.grid(alpha=0.3)
+
+        # ACF
+        from scipy import signal
+        n_lags = min(40, n_obs // 5)
+        acf = [1.0]
+        res = np.array(r["cgm_residuals"])
+        res -= res.mean()
+        var = res.var()
+        if var > 1e-12:
+            for lag in range(1, n_lags + 1):
+                acf.append(np.corrcoef(res[:-lag], res[lag:])[0, 1] if len(res) > lag else 0)
+        lags = range(len(acf))
+        ax2.bar(lags, acf, width=0.6, color="steelblue", alpha=0.8)
+        ax2.axhline(1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5, alpha=0.6)
+        ax2.axhline(-1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5, alpha=0.6)
+        ax2.set_xlabel("Lag")
+        ax2.set_ylabel("Autocorrelation")
+        ax2.set_title("Residual ACF")
+        ax2.grid(alpha=0.3)
+
+        plt.tight_layout()
+        out_path = os.path.join(out_dir, f"residuals_p{r['patient_id']}.png")
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  Saved {out_path}")
+
+
+def plot_residual_acf(data: dict, out_dir: str):
+    """Small-multiples ACF plots for all patients."""
+    results = [r for r in data["results"] if r["success"] and "cgm_residuals" in r]
+    if not results:
+        return
+
+    n = len(results)
+    n_cols = 5
+    n_rows = (n + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 2.5 * n_rows))
+    axes = axes.flatten()
+
+    for i, r in enumerate(results):
+        ax = axes[i]
+        res = np.array(r["cgm_residuals"])
+        n_obs = len(res)
+        n_lags = min(40, n_obs // 5)
+        res_c = res - res.mean()
+        var = res_c.var()
+        acf = [1.0]
+        if var > 1e-12:
+            for lag in range(1, n_lags + 1):
+                acf.append(np.corrcoef(res_c[:-lag], res_c[lag:])[0, 1] if len(res_c) > lag else 0)
+        lags = range(len(acf))
+        ax.bar(lags, acf, width=0.6, color="steelblue", alpha=0.7)
+        ax.axhline(1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5)
+        ax.axhline(-1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5)
+        ax.set_title(f"P{r['patient_id']} (cost={r['cost']:.2f})", fontsize=7)
+        ax.tick_params(axis="both", labelsize=5)
+
+    for j in range(n, len(axes)):
+        axes[j].set_visible(False)
+
+    fig.suptitle("Residual Autocorrelation Function (all patients)", fontsize=10)
+    plt.tight_layout()
+    out_path = os.path.join(out_dir, "acf_all.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+
+def plot_cmaes_landscape(data: dict, out_dir: str):
+    """PCA of CMA-ES restart points, colored by DBSCAN cluster."""
+    results = [r for r in data["results"] if r["success"] and "restarts" in r]
+    if not results:
+        return
+
+    try:
+        from sklearn.decomposition import PCA
+    except ImportError:
+        return
+
+    for r in results:
+        restarts = r["restarts"]
+        if len(restarts) < 3:
+            continue
+        X = np.array([rr["params"] for rr in restarts])
+        costs = np.array([rr["cost"] for rr in restarts])
+        labels = r["gate_a"].get("labels", [-1] * len(restarts))
+
+        Xc = X - X.mean(axis=0)
+        pca = PCA(n_components=2)
+        coords = pca.fit_transform(Xc)
+        var_exp = pca.explained_variance_ratio_
+
+        _, ax = plt.subplots(figsize=(6, 5))
+        n_clusters = r["gate_a"]["n_clusters"]
+        cmap = plt.cm.tab10
+        for pi in range(len(restarts)):
+            lbl = labels[pi] if labels else -1
+            color = cmap(lbl % 10) if lbl >= 0 else "gray"
+            marker = "x" if lbl < 0 else "o"
+            size = 50 if lbl >= 0 else 30
+            ax.scatter(coords[pi, 0], coords[pi, 1],
+                       c=[color], marker=marker, s=size,
+                       edgecolors="k", linewidths=0.3,
+                       alpha=0.8, zorder=3)
+            ax.annotate(f"{costs[pi]:.1f}", (coords[pi, 0], coords[pi, 1]),
+                        fontsize=5, alpha=0.7, xytext=(3, 3),
+                        textcoords="offset points")
+
+        ax.set_xlabel(f"PC1 ({var_exp[0]*100:.1f}%)")
+        ax.set_ylabel(f"PC2 ({var_exp[1]*100:.1f}%)")
+        ax.set_title(f"P{r['patient_id']}: {n_clusters} cluster(s), cost={r['cost']:.2f}")
+        ax.grid(alpha=0.3)
+
+        out_path = os.path.join(out_dir, f"cmaes_landscape_p{r['patient_id']}.png")
+        fig.savefig(out_path, dpi=150, bbox_inches="tight")
+        plt.close(fig)
+        print(f"  Saved {out_path}")
+
+
 def main():
     parser = argparse.ArgumentParser(description="Analyze cross-validation results")
     parser.add_argument("--json", default="crossval_results.json",
@@ -480,6 +637,9 @@ def main():
         plot_error_correlation_heatmap(data, args.out)
         plot_pca_with_true(data, args.out)
         plot_coefficient_variation(data, args.out)
+        plot_residual_timeseries(data, args.out)
+        plot_residual_acf(data, args.out)
+        plot_cmaes_landscape(data, args.out)
 
     print_detailed_gate_table(data)
     print_summary_table(data)

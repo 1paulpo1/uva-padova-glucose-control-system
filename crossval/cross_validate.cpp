@@ -77,12 +77,24 @@ static void write_csv_row(std::ofstream& csv, int pid, const IdentificationPipel
 // ===========================================================================
 // JSON building
 // ===========================================================================
+static json eigen_to_json(const Eigen::MatrixXd& m) {
+  json j = json::array();
+  for (int i = 0; i < m.rows(); ++i) {
+    json row = json::array();
+    for (int jj = 0; jj < m.cols(); ++jj)
+      row.push_back(m(i, jj));
+    j.push_back(std::move(row));
+  }
+  return j;
+}
+
 static json build_json_result(int pid, const IdentificationPipeline<>::Result& ires,
                               const VirtualPatientResult& vp,
                               const GateAResult& ga, const GateBResult& gb, const GateCResult& gc,
                               const std::vector<double>& abs_err,
                               const std::vector<double>& abs_err_phys,
-                              double elapsed_s)
+                              double elapsed_s,
+                              const std::vector<double>& cgm_residuals)
 {
   json j;
   j["patient_id"] = pid;
@@ -91,19 +103,60 @@ static json build_json_result(int pid, const IdentificationPipeline<>::Result& i
   j["total_evals"] = ires.total_evals;
   j["elapsed_s"] = elapsed_s;
 
+  // Gate A
   j["gate_a"]["passed"] = ga.passed;
   j["gate_a"]["n_clusters"] = ga.n_clusters;
+  {
+    json lbl = json::array();
+    for (int l : ga.labels) lbl.push_back(l);
+    j["gate_a"]["labels"] = std::move(lbl);
+  }
 
+  // Gate B
   j["gate_b"]["passed"] = gb.passed;
   j["gate_b"]["lb_q"] = gb.ljung_box.Q;
   j["gate_b"]["lb_p_value"] = gb.ljung_box.p_value;
   j["gate_b"]["lb_significant"] = gb.ljung_box.significant;
+  j["gate_b"]["lb_n_lags"] = gb.ljung_box.n_lags;
   j["gate_b"]["regime_bias"] = gb.regime_bias_detected;
   j["gate_b"]["description"] = gb.description;
+  {
+    json regimes = json::array();
+    for (const auto& rs : gb.regimes) {
+      json rj;
+      rj["name"] = rs.name;
+      rj["count"] = rs.count;
+      rj["mean_residual"] = rs.mean_residual;
+      rj["std_residual"] = rs.std_residual;
+      rj["mean_glucose"] = rs.mean_glucose;
+      rj["bias_mgdl"] = rs.bias_mgdl;
+      regimes.push_back(std::move(rj));
+    }
+    j["gate_b"]["regimes"] = std::move(regimes);
+  }
 
+  // Gate C
   j["gate_c"]["n_prior_dominated"] = static_cast<int>(
       std::count(gc.prior_dominated.begin(), gc.prior_dominated.end(), true));
+  j["gate_c"]["max_eigenvalue"] = gc.max_eigenvalue;
+  j["gate_c"]["condition_number"] = gc.condition_number;
+  {
+    json ev = json::array();
+    for (double v : gc.eigenvalues) ev.push_back(v);
+    j["gate_c"]["eigenvalues"] = std::move(ev);
+  }
+  {
+    json pl = json::array();
+    for (const auto& s : gc.param_labels) pl.push_back(s);
+    j["gate_c"]["param_labels"] = std::move(pl);
+  }
+  {
+    json pd = json::array();
+    for (bool b : gc.prior_dominated) pd.push_back(b);
+    j["gate_c"]["prior_dominated"] = std::move(pd);
+  }
 
+  // Per-parameter recovery
   json theta_true = json::array();
   json theta_rec = json::array();
   json err = json::array();
@@ -137,6 +190,31 @@ static json build_json_result(int pid, const IdentificationPipeline<>::Result& i
   j["abs_err_phys"] = std::move(err_phys);
   j["param_true_phys"] = std::move(true_phys);
   j["param_rec_phys"] = std::move(rec_phys);
+
+  // CMA-ES restart details
+  {
+    json rst = json::array();
+    for (const auto& rr : ires.all_restarts) {
+      json rrj;
+      rrj["cost"] = rr.cost;
+      json rp = json::array();
+      for (double v : rr.params) rp.push_back(v);
+      rrj["params"] = std::move(rp);
+      rst.push_back(std::move(rrj));
+    }
+    j["restarts"] = std::move(rst);
+  }
+
+  // Covariance matrix
+  if (ires.cov.rows() > 0 && ires.cov.cols() > 0)
+    j["cov"] = eigen_to_json(ires.cov);
+
+  // CGM residuals
+  {
+    json res = json::array();
+    for (double v : cgm_residuals) res.push_back(v);
+    j["cgm_residuals"] = std::move(res);
+  }
 
   return j;
 }
@@ -598,6 +676,16 @@ int main(int argc, char** argv) {
     }
     std::cout << "  [debug] recovery metrics done\n";
 
+    // Compute CGM residuals for JSON output
+    std::vector<double> cgm_residuals;
+    if (ires.success) {
+      ObservationCost<> obs_cost_res(id_data, vp.base_params, vp.active_desc);
+      auto cgm_sim = obs_cost_res.simulate_observations<double>(ires.params.data());
+      cgm_residuals.resize(id_data.cgm_value.size());
+      for (size_t i = 0; i < id_data.cgm_value.size(); ++i)
+        cgm_residuals[i] = id_data.cgm_value[i] - cgm_sim[i];
+    }
+
     // Print gate summary
     std::cout << "  Gates: A=" << (gateA.passed ? "PASS" : "FAIL")
               << "(" << gateA.n_clusters << " clusters)"
@@ -619,7 +707,8 @@ int main(int argc, char** argv) {
     auto t_end = std::chrono::steady_clock::now();
     double elapsed_s = std::chrono::duration<double>(t_end - t_start).count();
     results_json.push_back(build_json_result(pid, ires, vp, gateA, gateB, gateC,
-                                             abs_err, abs_err_phys, elapsed_s));
+                                             abs_err, abs_err_phys, elapsed_s,
+                                             cgm_residuals));
 
     std::cout << "  Elapsed: " << elapsed_s << " s\n\n";
   }

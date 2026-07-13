@@ -258,27 +258,24 @@ bool BasicState<T>::all_finite() const {
 
 template<typename T>
 void BasicState<T>::clamp_physiological() {
-  if constexpr (std::is_same_v<T, double>) {
-    auto clamp_val = [](T& v, T lo, T hi) {
-      if (v < lo) v = lo;
-      if (v > hi) v = hi;
-    };
-    clamp_val(Gp,    T(0),    T(1000));
-    clamp_val(Gt,    T(0),    T(1000));
-    clamp_val(Qsto1, T(0),    T(300000));
-    clamp_val(Qsto2, T(0),    T(300000));
-    clamp_val(Qgut,  T(0),    T(300000));
-    clamp_val(Ip,    T(0),    T(5000));
-    clamp_val(Ii,    T(0),    T(5000));
-    clamp_val(Isc1,  T(0),    T(5000));
-    clamp_val(Isc2,  T(0),    T(5000));
-    clamp_val(I_prime,T(0),   T(5000));
-    clamp_val(Xl,    T(0),    T(100));
-    clamp_val(X,     T(-100), T(100));
-    clamp_val(Gsc,   T(0),    T(1000));
-    clamp_val(mealD, T(0),    T(300000));
-  }
-  // For Jet types: no-op (preserves differentiability)
+  auto clamp_val = [](T& v, T lo, T hi) {
+    if (v < lo) v = lo;
+    if (v > hi) v = hi;
+  };
+  clamp_val(Gp,    T(0),    T(1000));
+  clamp_val(Gt,    T(0),    T(1000));
+  clamp_val(Qsto1, T(0),    T(300000));
+  clamp_val(Qsto2, T(0),    T(300000));
+  clamp_val(Qgut,  T(0),    T(300000));
+  clamp_val(Ip,    T(0),    T(5000));
+  clamp_val(Ii,    T(0),    T(5000));
+  clamp_val(Isc1,  T(0),    T(5000));
+  clamp_val(Isc2,  T(0),    T(5000));
+  clamp_val(I_prime,T(0),   T(5000));
+  clamp_val(Xl,    T(0),    T(100));
+  clamp_val(X,     T(-100), T(100));
+  clamp_val(Gsc,   T(0),    T(1000));
+  clamp_val(mealD, T(0),    T(300000));
 }
 
 } // namespace uva_padova

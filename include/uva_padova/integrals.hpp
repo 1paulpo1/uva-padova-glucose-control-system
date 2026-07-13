@@ -46,7 +46,7 @@ struct RK4Integrator {
                                  + T(2.0) * k3.at(i) + k4.at(i));
     }
 
-    // Safety clamp — only active for double
+    // Physiological clamping (hard for double, smooth for Jet)
     x.clamp_physiological();
   }
 

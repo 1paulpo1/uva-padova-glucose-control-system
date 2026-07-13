@@ -252,6 +252,160 @@ def plot_pca_tsne(data: dict, out_dir: str):
     print(f"  Saved {out_path}")
 
 
+def plot_cost_vs_clusters(data: dict, out_dir: str):
+    """Scatter: cost vs n_clusters (gate A), annotated by patient ID."""
+    results = data["results"]
+    costs = [r["cost"] for r in results if r["success"]]
+    n_cl = [r["gate_a"]["n_clusters"] for r in results if r["success"]]
+    pids = [r["patient_id"] for r in results if r["success"]]
+    if not costs:
+        return
+
+    fig, ax = plt.subplots(figsize=(7, 4))
+    ax.scatter(n_cl, costs, s=50, c="steelblue", edgecolors="k", linewidths=0.5, zorder=3)
+    for pid, nc, c in zip(pids, n_cl, costs):
+        ax.annotate(str(pid), (nc, c), textcoords="offset points",
+                    xytext=(5, 5), fontsize=7, alpha=0.8)
+    ax.set_xlabel("Number of CMA-ES clusters (gate A)")
+    ax.set_ylabel("Final cost")
+    ax.set_title("Cost vs. number of CMA-ES modes")
+    ax.grid(alpha=0.3)
+    ax.set_xticks(sorted(set(n_cl)))
+
+    out_path = os.path.join(out_dir, "cost_vs_clusters.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+
+def plot_error_correlation_heatmap(data: dict, out_dir: str):
+    """Heatmap of Pearson correlation between parameter errors."""
+    params = data["param_names"]
+    results = data["results"]
+    X = np.array([r["abs_err_log"] for r in results if r["success"]])
+    if len(X) < 3:
+        return
+
+    C = np.corrcoef(X.T)
+    mask = np.triu(np.ones_like(C, dtype=bool), k=1)
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    im = ax.imshow(C, cmap="RdBu_r", vmin=-1, vmax=1, aspect="equal")
+    ax.set_xticks(range(len(params)))
+    ax.set_yticks(range(len(params)))
+    ax.set_xticklabels(params, rotation=45, ha="right", fontsize=7)
+    ax.set_yticklabels(params, fontsize=7)
+    for i in range(len(params)):
+        for j in range(len(params)):
+            if not mask[i, j]:
+                ax.text(j, i, f"{C[i,j]:.2f}", ha="center", va="center",
+                        fontsize=6, color="white" if abs(C[i,j]) > 0.5 else "black")
+    ax.set_title("Correlation of |θ_err| between parameters")
+    plt.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+
+    out_path = os.path.join(out_dir, "error_correlation_heatmap.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+
+def plot_pca_with_true(data: dict, out_dir: str):
+    """PCA of recovered θ with true θ projected; lines connect each pair."""
+    params = data["param_names"]
+    results = data["results"]
+    try:
+        from sklearn.decomposition import PCA
+    except ImportError:
+        return
+
+    theta_r = np.array([r["theta_rec"] for r in results if r["success"]])
+    theta_t = np.array([r["theta_true"] for r in results if r["success"]])
+    costs = np.array([r["cost"] for r in results if r["success"]])
+    if len(theta_r) < 3:
+        return
+
+    all_theta = np.vstack([theta_r, theta_t])
+    all_centered = all_theta - all_theta.mean(axis=0)
+
+    pca = PCA(n_components=2)
+    coords = pca.fit_transform(all_centered)
+    n = len(theta_r)
+    rec_2d = coords[:n]
+    true_2d = coords[n:]
+    var_exp = pca.explained_variance_ratio_
+
+    fig, ax = plt.subplots(figsize=(7, 6))
+    sc = ax.scatter(rec_2d[:, 0], rec_2d[:, 1], c=costs, cmap="viridis",
+                    s=40, edgecolors="k", linewidths=0.5, zorder=3, label="Recovered")
+    ax.scatter(true_2d[:, 0], true_2d[:, 1], marker="x", c="red",
+               s=40, linewidths=1, zorder=3, label="True")
+    for i in range(n):
+        ax.plot([true_2d[i, 0], rec_2d[i, 0]],
+                [true_2d[i, 1], rec_2d[i, 1]],
+                color="gray", linewidth=0.5, alpha=0.5, zorder=1)
+
+    ax.set_xlabel(f"PC1 ({var_exp[0]*100:.1f}%)")
+    ax.set_ylabel(f"PC2 ({var_exp[1]*100:.1f}%)")
+    ax.set_title("PCA: recovered θ vs true θ")
+    ax.legend(fontsize=7)
+    ax.grid(alpha=0.3)
+    plt.colorbar(sc, ax=ax, label="Final cost")
+
+    out_path = os.path.join(out_dir, "pca_vs_true.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+
+def plot_coefficient_variation(data: dict, out_dir: str):
+    """Bar chart of coefficient of variation per parameter."""
+    params = data["param_names"]
+    results = data["results"]
+
+    cv_vals = []
+    for i, pname in enumerate(params):
+        ratios = []
+        for r in results:
+            if not r["success"]:
+                continue
+            ae = r["abs_err_log"][i]
+            tv = abs(r["theta_true"][i]) if r["theta_true"][i] is not None else 0
+            if ae is not None and tv > 1e-10:
+                ratios.append(ae / tv)
+        cv_vals.append(np.median(ratios) if ratios else 0)
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    colors = plt.cm.RdYlGn_r(1 - np.clip(np.array(cv_vals) / max(cv_vals), 0, 1))
+    bars = ax.bar(range(len(params)), cv_vals, color=colors, edgecolor="k", linewidth=0.5)
+    ax.set_xticks(range(len(params)))
+    ax.set_xticklabels(params, rotation=45, ha="right", fontsize=8)
+    ax.set_ylabel("Median |θ_err| / |θ_true|")
+    ax.set_title("Coefficient of variation by parameter")
+    ax.grid(axis="y", alpha=0.3)
+
+    out_path = os.path.join(out_dir, "coeff_variation.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+
+def print_detailed_gate_table(data: dict):
+    """Print per-patient gate summary."""
+    results = data["results"]
+    print(f"\n{'PID':>4} {'Cost':>10} {'nClust':>6} {'GateA':>6} {'GateB':>6} {'nDom':>5} {'LjungQ':>10}")
+    print(f"{'─'*4} {'─'*10} {'─'*6} {'─'*6} {'─'*6} {'─'*5} {'─'*10}")
+    for r in results:
+        pid = r["patient_id"]
+        cost = r["cost"]
+        nc = r["gate_a"]["n_clusters"]
+        ga = "PASS" if r["gate_a"]["passed"] else "FAIL"
+        gb = "PASS" if r["gate_b"]["passed"] else "FAIL"
+        nd = r["gate_c"]["n_prior_dominated"]
+        lq = r["gate_b"]["lb_q"]
+        print(f"{pid:>4} {cost:>10.4f} {nc:>6} {ga:>6} {gb:>6} {nd:>5} {lq:>10.1f}")
+    print()
+
+
 def print_summary_table(data: dict):
     """Print per-parameter recovery stats."""
     params = data["param_names"]
@@ -322,7 +476,12 @@ def main():
         plot_error_vs_phys_magnitude(data, args.out)
         plot_gate_summary(data, args.out)
         plot_pca_tsne(data, args.out)
+        plot_cost_vs_clusters(data, args.out)
+        plot_error_correlation_heatmap(data, args.out)
+        plot_pca_with_true(data, args.out)
+        plot_coefficient_variation(data, args.out)
 
+    print_detailed_gate_table(data)
     print_summary_table(data)
 
 

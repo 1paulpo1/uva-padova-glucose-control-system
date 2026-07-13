@@ -198,6 +198,60 @@ def plot_gate_summary(data: dict, out_dir: str):
     print(f"  Saved {out_path}")
 
 
+def plot_pca_tsne(data: dict, out_dir: str):
+    """PCA and t-SNE of recovered θ matrix, colored by final cost."""
+    params = data["param_names"]
+    results = data["results"]
+
+    theta = [r["theta_rec"] for r in results if r["success"]]
+    costs = [r["cost"] for r in results if r["success"]]
+    if len(theta) < 3:
+        print("  Too few points for PCA/t-SNE")
+        return
+
+    try:
+        from sklearn.decomposition import PCA
+        from sklearn.manifold import TSNE
+    except ImportError:
+        print("  sklearn not available, skipping PCA/t-SNE")
+        return
+
+    X = np.array(theta)
+    c = np.array(costs)
+    Xc = X - X.mean(axis=0)
+
+    n = max(2, min(5, len(X) - 1))
+    pca = PCA(n_components=2)
+    pca_c = pca.fit_transform(Xc)
+    pca_var = pca.explained_variance_ratio_
+
+    tsne = TSNE(n_components=2, random_state=42, perplexity=n)
+    tsne_c = tsne.fit_transform(Xc)
+
+    fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
+    sc1 = ax1.scatter(pca_c[:, 0], pca_c[:, 1], c=c, cmap="viridis",
+                      s=40, edgecolors="k", linewidths=0.3)
+    ax1.set_xlabel(f"PC1 ({pca_var[0]*100:.1f}%)")
+    ax1.set_ylabel(f"PC2 ({pca_var[1]*100:.1f}%)")
+    ax1.set_title("PCA of recovered θ (colored by cost)")
+    ax1.grid(alpha=0.3)
+    plt.colorbar(sc1, ax=ax1, label="Final cost")
+
+    sc2 = ax2.scatter(tsne_c[:, 0], tsne_c[:, 1], c=c, cmap="viridis",
+                      s=40, edgecolors="k", linewidths=0.3)
+    ax2.set_xlabel("t-SNE 1")
+    ax2.set_ylabel("t-SNE 2")
+    ax2.set_title("t-SNE of recovered θ (colored by cost)")
+    ax2.grid(alpha=0.3)
+    plt.colorbar(sc2, ax=ax2, label="Final cost")
+
+    plt.tight_layout()
+    out_path = os.path.join(out_dir, "pca_tsne.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
+
+
 def print_summary_table(data: dict):
     """Print per-parameter recovery stats."""
     params = data["param_names"]
@@ -267,6 +321,7 @@ def main():
         plot_error_boxplot(data, args.out)
         plot_error_vs_phys_magnitude(data, args.out)
         plot_gate_summary(data, args.out)
+        plot_pca_tsne(data, args.out)
 
     print_summary_table(data)
 

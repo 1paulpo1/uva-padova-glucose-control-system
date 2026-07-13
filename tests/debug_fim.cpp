@@ -362,6 +362,12 @@ int main() {
   Eigen::MatrixXd Hs = Eigen::MatrixXd::Zero(n_params, n_params);
   Eigen::MatrixXd Vs = Eigen::MatrixXd::Zero(n_params, n_params);
 
+  // NOTE: uses per-observation loss as a robust working model for the
+  // sandwich estimator. This differs from the aggregate SoftLOneLoss used
+  // in the optimization objective (compute_scalar_cost and Ceres), which
+  // is intentional — the sandwich estimator is designed to be robust to
+  // working model misspecification, and per-observation loss yields a
+  // full-rank V matrix (aggregate loss would give rank-1 V).
   ceres::SoftLOneLoss loss(1.0);
   double rho[3];
 

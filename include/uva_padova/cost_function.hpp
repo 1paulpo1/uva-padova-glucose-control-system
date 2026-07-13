@@ -173,20 +173,18 @@ struct ObservationCost : ceres::CostFunction {
     return true;
   }
 
-  // ---- Scalar cost (matches Ceres SoftLOneLoss) ----
-  // Returns Σ 2·(√(1+r²) − 1)  — matches Ceres ½·Σ residual² with SoftLOneLoss.
+  // ---- Scalar cost (matches Ceres SoftLOneLoss on aggregate ||r||²) ----
+  // Returns √(1 + Σᵢ rᵢ²) − 1  — matches Ceres ½·SoftLOneLoss(||r||²).
   double compute_scalar_cost(const double* params) const {
-    using std::sqrt;
     eval_count_++;
-    double total = 0.0;
     auto cgm = simulate_observations<double>(params);
+    double sum_sq = 0.0;
     for (int i = 0; i < n_obs_; ++i) {
       double r = (cgm[i] - data_.cgm_value[i]) / sigma_;
-      double term = 2.0 * (std::sqrt(1.0 + r * r) - 1.0);
-      if (!std::isfinite(term)) return 1e20;
-      total += term;
+      if (!std::isfinite(r)) return 1e20;
+      sum_sq += r * r;
     }
-    return total;
+    return std::sqrt(1.0 + sum_sq) - 1.0;
   }
 
   // ---- Helpers for NaN-derivative detection and salvage ----

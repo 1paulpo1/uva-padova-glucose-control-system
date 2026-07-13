@@ -893,18 +893,17 @@ TEST_F(LMRosenbrockTest, numerical_hessian_matches_analytic) {
   Eigen::MatrixXd J_raw;
   ASSERT_TRUE(obs_cost.compute_raw_gradients(params_ptr, raw_resid, J_raw));
 
-  Eigen::MatrixXd H_analytic = Eigen::MatrixXd::Zero(n_params, n_params);
+  // Aggregate loss: cost = sqrt(1 + ||r||²) - 1
+  Eigen::VectorXd r_vec = Eigen::Map<const Eigen::VectorXd>(raw_resid.data(), n_obs);
+  double s = r_vec.squaredNorm();
   ceres::SoftLOneLoss loss(1.0);
   double rho[3];
-
-  for (int i = 0; i < n_obs; ++i) {
-    double r = raw_resid[i];
-    double s = r * r;
-    loss.Evaluate(s, rho);
-    double d2loss_dr2 = rho[1] * 2.0 + rho[2] * 4.0 * s;
-    auto Ji = J_raw.row(i);
-    H_analytic += d2loss_dr2 * Ji.transpose() * Ji;
-  }
+  loss.Evaluate(s, rho);
+  // rho[1] = 1/sqrt(1+s), rho[2] = -1/(2*(1+s)^(3/2))
+  // H = rho[1]·JᵀJ + 2·rho[2]·(Jᵀr)(Jᵀr)ᵀ
+  Eigen::VectorXd Jtr = J_raw.transpose() * r_vec;
+  Eigen::MatrixXd H_analytic = rho[1] * J_raw.transpose() * J_raw
+                             + 2.0 * rho[2] * Jtr * Jtr.transpose();
   for (int i = 0; i < n_params; ++i) {
     H_analytic(i, i) += 1.0 / (prior.stds_[i] * prior.stds_[i]);
   }

@@ -107,8 +107,8 @@ TEST(ObservationCostTest, scalar_cost) {
 
   // r = (100 - 120) / 2.9
   double r = (100.0 - 120.0) / 2.9;
-  double expected_per_obs = 2.0 * (std::sqrt(1.0 + r * r) - 1.0);
-  double expected = expected_per_obs * cost.n_obs_;
+  double sum_sq = r * r * cost.n_obs_;
+  double expected = std::sqrt(1.0 + sum_sq) - 1.0;
 
   EXPECT_NEAR(cost.compute_scalar_cost(theta.data()), expected, 1e-10);
 }

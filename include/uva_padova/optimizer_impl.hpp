@@ -12,6 +12,29 @@
 namespace uva_padova {
 
 // ===========================================================================
+// Helper: validate that the Jacobian of obs_cost at theta is all-finite.
+// Returns true if covariance computation is safe.
+// ===========================================================================
+namespace detail {
+template <typename Simulator>
+static bool validate_jacobian(ObservationCost<Simulator>& obs_cost,
+                              const std::vector<double>& theta) {
+  if (theta.empty()) return false;
+  int n_obs = obs_cost.n_obs_;
+  int n_params = obs_cost.n_params_;
+  const double* params_ptr = theta.data();
+  std::vector<double> resid(n_obs);
+  std::vector<double> jac_buf(n_obs * n_params);
+  double* jac_ptrs[] = { jac_buf.data() };
+  if (!obs_cost.Evaluate(&params_ptr, resid.data(), jac_ptrs))
+    return false;
+  for (int i = 0; i < n_obs * n_params; ++i)
+    if (!std::isfinite(jac_buf[i])) return false;
+  return true;
+}
+} // namespace detail
+
+// ===========================================================================
 // Ceres Levenberg-Marquardt optimizer (templated on Simulator)
 // ===========================================================================
 template <typename Simulator>
@@ -48,20 +71,27 @@ LMOptimizer::Result LMOptimizer::run(
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
 
-  ceres::Covariance::Options cov_options;
-  cov_options.apply_loss_function = true;
-  ceres::Covariance covariance(cov_options);
-
   Eigen::MatrixXd cov_matrix;
   {
     int dim = obs_cost.n_params_;
-    std::vector<std::pair<const double*, const double*>> cov_blocks;
-    cov_blocks.push_back({x.data(), x.data()});
-    if (covariance.Compute(cov_blocks, &problem)) {
-      cov_matrix.resize(dim, dim);
-      covariance.GetCovarianceBlock(x.data(), x.data(), cov_matrix.data());
-    } else {
+    // Do not enter the covariance path when Ceres already declared the
+    // solution unusable. In that state SuiteSparse/CHOLMOD may fail during
+    // factorisation even if a direct Jacobian probe later looks finite.
+    bool jacobian_ok = detail::validate_jacobian(obs_cost, x);
+    if (!jacobian_ok || !summary.IsSolutionUsable()) {
       cov_matrix = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
+    } else {
+      ceres::Covariance::Options cov_options;
+      cov_options.apply_loss_function = true;
+      ceres::Covariance covariance(cov_options);
+      std::vector<std::pair<const double*, const double*>> cov_blocks;
+      cov_blocks.push_back({x.data(), x.data()});
+      if (covariance.Compute(cov_blocks, &problem)) {
+        cov_matrix.resize(dim, dim);
+        covariance.GetCovarianceBlock(x.data(), x.data(), cov_matrix.data());
+      } else {
+        cov_matrix = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
+      }
     }
   }
 
@@ -94,15 +124,18 @@ LMOptimizer::CovarianceResult LMOptimizer::compute_covariance(
   tmp_problem.AddResidualBlock(&obs_cost, new ceres::SoftLOneLoss(1.0), x.data());
   tmp_problem.AddResidualBlock(&prior_cost, nullptr, x.data());
 
-  ceres::Covariance::Options cov_opts;
-  ceres::Covariance tmp_cov(cov_opts);
-  std::vector<std::pair<const double*, const double*>> cb = {
-      {x.data(), x.data()}};
-
   Eigen::MatrixXd cov_mat = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
-  if (tmp_cov.Compute(cb, &tmp_problem)) {
-    cov_mat.resize(dim, dim);
-    tmp_cov.GetCovarianceBlock(x.data(), x.data(), cov_mat.data());
+  bool jacobian_ok = detail::validate_jacobian(obs_cost, x);
+  if (jacobian_ok) {
+    ceres::Covariance::Options cov_opts;
+    cov_opts.apply_loss_function = true;
+    ceres::Covariance tmp_cov(cov_opts);
+    std::vector<std::pair<const double*, const double*>> cb = {
+        {x.data(), x.data()}};
+    if (tmp_cov.Compute(cb, &tmp_problem)) {
+      cov_mat.resize(dim, dim);
+      tmp_cov.GetCovarianceBlock(x.data(), x.data(), cov_mat.data());
+    }
   }
 
   return {cov_mat, {}};
@@ -324,6 +357,7 @@ Params IdentificationPipeline<CMAES, LM>::Result::to_params(
     if (desc[i].fixed) continue;
     if (theta_idx >= params.size()) break;
     double mult = std::exp(params[theta_idx]);
+    if (!std::isfinite(mult)) mult = 1.0;
 
     if (desc[i].name == "kp1")  p.kp1  *= mult;
     if (desc[i].name == "kp2")  p.kp2  *= mult;
@@ -357,6 +391,8 @@ Params IdentificationPipeline<CMAES, LM>::Result::to_params(
     if (desc[i].name == "r1")   p.r1   *= mult;
     if (desc[i].name == "Gth")  p.Gth  *= mult;
     if (desc[i].name == "BW")   p.BW   *= mult;
+    if (desc[i].name == "Fcns") p.Fcns *= mult;
+    if (desc[i].name == "Km0")  p.Km0  *= mult;
 
     ++theta_idx;
   }

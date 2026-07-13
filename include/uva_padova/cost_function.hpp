@@ -126,8 +126,11 @@ struct ObservationCost : ceres::CostFunction {
         JetT r = (cgm[i] - JetT(data_.cgm_value[i])) / JetT(sigma_);
         residuals[i] = extract_val(r);
         if (!std::isfinite(residuals[i])) return false;
-        for (int j = 0; j < n_params_; ++j)
-          jacobians[0][i * n_params_ + j] = extract_deriv(r, j);
+        for (int j = 0; j < n_params_; ++j) {
+          double d = extract_deriv(r, j);
+          if (!std::isfinite(d)) return false;
+          jacobians[0][i * n_params_ + j] = d;
+        }
       }
     } else {
       auto cgm = simulate_observations<double>(params);
@@ -161,8 +164,11 @@ struct ObservationCost : ceres::CostFunction {
       JetT r = (cgm[i] - JetT(data_.cgm_value[i])) / JetT(sigma_);
       raw_residuals[i] = extract_val(r);
       if (!std::isfinite(raw_residuals[i])) return false;
-      for (int j = 0; j < n_params_; ++j)
-        J_raw(i, j) = extract_deriv(r, j);
+      for (int j = 0; j < n_params_; ++j) {
+        double d = extract_deriv(r, j);
+        if (!std::isfinite(d)) return false;
+        J_raw(i, j) = d;
+      }
     }
     return true;
   }
@@ -181,6 +187,44 @@ struct ObservationCost : ceres::CostFunction {
       total += term;
     }
     return total;
+  }
+
+  // ---- Helpers for NaN-derivative detection and salvage ----
+  template<typename T>
+  static bool scalar_is_finite(const T& x) {
+    if constexpr (std::is_same_v<T, double>) {
+      return std::isfinite(x);
+    } else {
+      if (!std::isfinite(x.a)) return false;
+      for (int i = 0; i < x.v.size(); ++i)
+        if (!std::isfinite(x.v[i])) return false;
+      return true;
+    }
+  }
+
+  template<typename T>
+  static bool state_is_finite(const BasicState<T>& s) {
+    return scalar_is_finite(s.Gp) && scalar_is_finite(s.Gt) &&
+           scalar_is_finite(s.Qsto1) && scalar_is_finite(s.Qsto2) &&
+           scalar_is_finite(s.Qgut) && scalar_is_finite(s.Ip) &&
+           scalar_is_finite(s.Ii) && scalar_is_finite(s.Isc1) &&
+           scalar_is_finite(s.Isc2) && scalar_is_finite(s.I_prime) &&
+           scalar_is_finite(s.Xl) && scalar_is_finite(s.X) &&
+           scalar_is_finite(s.Gsc) && scalar_is_finite(s.mealD);
+  }
+
+  template<typename T>
+  static void salvage_state(BasicState<T>& s) {
+    if constexpr (!std::is_same_v<T, double>) {
+      auto fix = [](T& v) {
+        if (!std::isfinite(v.a)) { v.a = 0.0; v.v.setZero(); return; }
+        for (int i = 0; i < v.v.size(); ++i)
+          if (!std::isfinite(v.v[i])) v.v[i] = 0.0;
+      };
+      fix(s.Gp); fix(s.Gt); fix(s.Qsto1); fix(s.Qsto2); fix(s.Qgut);
+      fix(s.Ip); fix(s.Ii); fix(s.Isc1); fix(s.Isc2); fix(s.I_prime);
+      fix(s.Xl); fix(s.X); fix(s.Gsc); fix(s.mealD);
+    }
   }
 
   // ---- Trajectory simulation ----
@@ -303,8 +347,10 @@ struct ObservationCost : ceres::CostFunction {
       }
 
       // RK4 step
-      if (t < data_.total_min())
+      if (t < data_.total_min()) {
         Simulator::step(state, u, p, 1.0);
+        salvage_state(state);
+      }
     }
 
     return cgm_out;
@@ -342,6 +388,14 @@ struct ObservationCost : ceres::CostFunction {
     for (int i = 0; i < n_params_; ++i) {
       const auto& desc = param_desc_[i];
       T multiplier = exp(theta[i]);
+      if (!scalar_is_finite(multiplier)) {
+        if constexpr (std::is_same_v<T, double>) {
+          multiplier = T(1.0);
+        } else {
+          multiplier.a = 1.0;
+          multiplier.v.setZero();
+        }
+      }
 
       if (desc.name == "kp1")  p.kp1  *= multiplier;
       if (desc.name == "kp2")  p.kp2  *= multiplier;
@@ -375,6 +429,8 @@ struct ObservationCost : ceres::CostFunction {
       if (desc.name == "r1")   p.r1   *= multiplier;
       if (desc.name == "Gth")  p.Gth  *= multiplier;
       if (desc.name == "BW")   p.BW   *= multiplier;
+      if (desc.name == "Fcns") p.Fcns *= multiplier;
+      if (desc.name == "Km0")  p.Km0  *= multiplier;
     }
   }
 

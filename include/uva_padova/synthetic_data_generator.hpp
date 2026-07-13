@@ -47,7 +47,7 @@ inline double param_value(const Params& p, const std::string& name) {
   if (name == "b")    return p.b;    if (name == "d")    return p.d;
   if (name == "kp1")  return p.kp1;  if (name == "kp2")  return p.kp2;  if (name == "kp3")  return p.kp3;
   if (name == "Vm0")  return p.Vm0;  if (name == "Vmx")  return p.Vmx;  if (name == "p2U")  return p.p2U;
-  if (name == "ka1")  return p.ka1;  if (name == "ka2")  return p.ka2;  if (name == "kd")   return p.kd;
+  if (name == "ka1")  return p.ka1;  if (name == "ka2")  return p.ka2;  if (name == "kd")   return p.kd;   if (name == "ki")   return p.ki;
   if (name == "Fcns") return p.Fcns; if (name == "Km0")  return p.Km0;
   if (name == "r1")   return p.r1;   if (name == "Gth")  return p.Gth;
   if (name == "ke1")  return p.ke1;  if (name == "ke2")  return p.ke2;

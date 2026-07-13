@@ -15,6 +15,7 @@
 #include "uva_padova/optimizer.hpp"
 #include "uva_padova/diagnostics.hpp"
 #include "uva_padova/cost_function.hpp"
+#include "uva_padova/constants.hpp"
 
 using namespace uva_padova;
 using namespace uva_padova::crossval;
@@ -27,7 +28,7 @@ struct CoutSilencer {
   std::streambuf* old;
   std::ofstream null;
   CoutSilencer() : old(std::cout.rdbuf()), null("/dev/null") {
-    std::cout.rdbuf(null.rdbuf());
+    if (null.is_open()) std::cout.rdbuf(null.rdbuf());
   }
   ~CoutSilencer() { std::cout.rdbuf(old); }
 };
@@ -286,6 +287,9 @@ static void load_json_config(VirtualPatientConfig& cfg, const std::string& path)
     if (auto v = it->find("perturbation_std"); v != it->end()) cfg.perturbation_std = v->get<double>();
   }
 
+  // Body weight (before meals, used in bolus_u conversion)
+  if (auto it = j.find("body_weight_kg"); it != j.end()) cfg.body_weight_kg = it->get<double>();
+
   // Daily meals
   if (auto it = j.find("daily_meals"); it != j.end() && it->is_array() && !it->empty()) {
     cfg.daily_meals.clear();
@@ -296,7 +300,8 @@ static void load_json_config(VirtualPatientConfig& cfg, const std::string& path)
       if (m.contains("cho_g")) meal.cho_mg = m["cho_g"].get<double>() * 1000.0;
       else meal.cho_mg = m["cho_mg"].get<double>();
       // support both "bolus_u" and "bolus_dose_pmol_kg"
-      if (m.contains("bolus_u")) meal.bolus_dose_pmol_kg = m["bolus_u"].get<double>() * 6000.0 / 75.0;
+      if (m.contains("bolus_u"))
+        meal.bolus_dose_pmol_kg = m["bolus_u"].get<double>() * constants::kInsulinUnits_To_Pmol / cfg.body_weight_kg;
       else meal.bolus_dose_pmol_kg = m["bolus_dose_pmol_kg"].get<double>();
       cfg.daily_meals.push_back(meal);
     }
@@ -354,12 +359,6 @@ static void apply_cli_overrides(VirtualPatientConfig& cfg, const CLIConfig& cli)
   if (!std::isnan(cli.perturbation_std)) cfg.perturbation_std = cli.perturbation_std;
   if (cli.restarts > 0) cfg.n_cmaes_restarts = cli.restarts;
   if (cli.evals > 0) cfg.cmaes_evals = cli.evals;
-}
-
-static bool is_number(const std::string& s) {
-  char* end = nullptr;
-  std::strtod(s.c_str(), &end);
-  return end != s.c_str() && *end == '\0';
 }
 
 // ===========================================================================
@@ -464,10 +463,7 @@ int main(int argc, char** argv) {
     apply_noise_preset(cfg, cli.noise_preset);
 
   apply_cli_overrides(cfg, cli);
-  // cli fields that directly map to cfg
   cfg.seed = cli.base_seed;
-  cfg.n_cmaes_restarts = cfg.n_cmaes_restarts;  // already set
-  cfg.cmaes_evals = cfg.cmaes_evals;
 
   // Custom param descriptors path
   cfg.params_config_path = cli.params_config_path;

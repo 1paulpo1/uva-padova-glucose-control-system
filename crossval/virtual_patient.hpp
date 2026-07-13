@@ -5,6 +5,7 @@
 
 #include "uva_padova/types.hpp"
 #include "uva_padova/cost_function.hpp"
+#include "uva_padova/constants.hpp"
 
 namespace uva_padova {
 namespace crossval {
@@ -43,6 +44,8 @@ struct VirtualPatientConfig {
   CGMNoiseConfig cgm_noise;
   MealErrorConfig meal_errors;
 
+  double body_weight_kg{75.0};   // default body weight [kg], used for bolus_u→pmol/kg
+
   struct DailyMeal {
     int time_min;                // minutes from start of day
     double cho_mg;               // carbohydrate amount [mg]
@@ -56,9 +59,9 @@ inline VirtualPatientConfig default_config() {
   VirtualPatientConfig cfg;
   cfg.cgm_noise.fixed_sd = 3.0;
   cfg.daily_meals = {
-    { 360, 60000,  6.0 * 6000.0 / 75.0 },
-    { 720, 80000,  8.0 * 6000.0 / 75.0 },
-    { 1080, 70000, 7.0 * 6000.0 / 75.0 },
+    { 360, 60000,  6.0 * constants::kInsulinUnits_To_Pmol / cfg.body_weight_kg },
+    { 720, 80000,  8.0 * constants::kInsulinUnits_To_Pmol / cfg.body_weight_kg },
+    { 1080, 70000, 7.0 * constants::kInsulinUnits_To_Pmol / cfg.body_weight_kg },
   };
   return cfg;
 }

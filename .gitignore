@@ -1,6 +1,8 @@
 # Build
 build/
+build_noasan/
 cmake-build-*/
+Testing/
 
 # IDE
 .idea/
@@ -14,6 +16,7 @@ cmake-build-*/
 # OS
 .DS_Store
 Thumbs.db
+CMakeFiles/
 
 # Validation output (generated)
 

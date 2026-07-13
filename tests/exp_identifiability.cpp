@@ -52,7 +52,7 @@ struct CoutSilencer {
   std::streambuf* old;
   std::ofstream null;
   CoutSilencer() : old(std::cout.rdbuf()), null("/dev/null") {
-    std::cout.rdbuf(null.rdbuf());
+    if (null.is_open()) std::cout.rdbuf(null.rdbuf());
   }
   ~CoutSilencer() { std::cout.rdbuf(old); }
 };

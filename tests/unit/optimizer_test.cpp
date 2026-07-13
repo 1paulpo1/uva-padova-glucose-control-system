@@ -694,6 +694,190 @@ TEST_F(LMRosenbrockTest, ceres_cov_matches_jtwj) {
   EXPECT_TRUE(expected_cov.isApprox(res.cov, 1e-4));
 }
 
+// ===========================================================================
+// NaN-derivative and NaN-value detection tests
+// ===========================================================================
+// Simulator that produces NaN in the simulation (NaN basal insulin
+// propagates to Gsc via step, triggering the residual-value NaN check)
+struct NaNValSimulator {
+  static void reset() {}
+
+  static double find_steady_state(State& out,
+                                  const BasicParams<double>& /*p*/,
+                                  double /*Gb*/) {
+    out = State{};
+    return std::numeric_limits<double>::quiet_NaN();
+  }
+
+  template<typename T>
+  static void step(BasicState<T>& state, const BasicInputs<T>& u,
+                   const BasicParams<T>&, double dt) {
+    state.Gsc += T(dt) * u.insulin_rate;
+  }
+
+  template<int EventType, typename T>
+  static void notify(const BasicState<T>&, const BasicInputs<T>&, T) {}
+};
+
+// Simulator that injects NaN derivatives into Gsc at each step
+struct NaNJacSimulator {
+  static void reset() {}
+
+  static double find_steady_state(State& out,
+                                  const BasicParams<double>& /*p*/,
+                                  double /*Gb*/) {
+    out = State{};
+    return 1.0;
+  }
+
+  template<typename T>
+  static void step(BasicState<T>& state, const BasicInputs<T>&,
+                   const BasicParams<T>& p, double dt) {
+    if constexpr (std::is_same_v<T, double>) {
+      state.Gsc += T(dt) * p.kp1;
+    } else {
+      state.Gsc.a += dt * p.kp1.a;
+      state.Gsc.v.setConstant(std::numeric_limits<double>::quiet_NaN());
+    }
+  }
+
+  template<int EventType, typename T>
+  static void notify(const BasicState<T>&, const BasicInputs<T>&, T) {}
+};
+
+TEST(NaNJacobianTest, salvage_state_recovers_from_nan) {
+  using JetT = ceres::Jet<double, 2>;
+  BasicState<JetT> state;
+  state.Gsc.a = 120.0;
+  state.Gsc.v[0] = std::numeric_limits<double>::quiet_NaN();
+  state.Gsc.v[1] = std::numeric_limits<double>::quiet_NaN();
+
+  ObservationCost<NaNJacSimulator>::salvage_state(state);
+
+  EXPECT_TRUE(std::isfinite(state.Gsc.a));
+  EXPECT_TRUE(std::isfinite(state.Gsc.v[0]));
+  EXPECT_TRUE(std::isfinite(state.Gsc.v[1]));
+  EXPECT_DOUBLE_EQ(state.Gsc.v[0], 0.0);
+  EXPECT_DOUBLE_EQ(state.Gsc.v[1], 0.0);
+}
+
+TEST(NaNJacobianTest, salvage_state_recovers_nan_value) {
+  using JetT = ceres::Jet<double, 2>;
+  BasicState<JetT> state;
+  state.Gsc.a = std::numeric_limits<double>::quiet_NaN();
+  state.Gsc.v[0] = 5.0;
+
+  ObservationCost<NaNJacSimulator>::salvage_state(state);
+
+  EXPECT_TRUE(std::isfinite(state.Gsc.a));
+  EXPECT_DOUBLE_EQ(state.Gsc.v[0], 0.0);
+}
+
+TEST(NaNJacobianTest, evaluate_succeeds_after_salvage) {
+  // Even with NaN-producing simulation, salvage fixes the state before
+  // observations are recorded.  Evaluate should succeed and produce
+  // a clean (finite) Jacobian.
+  auto data = make_id_data({1.0, 2.0, 3.0});
+  auto base = Params::defaults_t1d();
+  ObservationCost<NaNValSimulator> obs_cost(data, base,
+                                            {{"kp1", 0, 1}});
+
+  std::vector<double> params = {0.5};
+  const double* params_ptr = params.data();
+  int n_obs = obs_cost.n_obs_;
+  int n_params = obs_cost.n_params_;
+  std::vector<double> resid(n_obs);
+  std::vector<double> jac_buf(n_obs * n_params);
+  double* jac_ptrs[] = { jac_buf.data() };
+
+  bool result = obs_cost.Evaluate(&params_ptr, resid.data(), jac_ptrs);
+  EXPECT_TRUE(result);
+  for (int i = 0; i < n_obs; ++i)
+    EXPECT_TRUE(std::isfinite(resid[i]));
+  for (int i = 0; i < n_obs * n_params; ++i)
+    EXPECT_TRUE(std::isfinite(jac_buf[i]));
+}
+
+TEST(NaNJacobianTest, salvage_recovers_and_evaluate_succeeds) {
+  // The salvage fixes NaN derivatives after each step, so Evaluate
+  // should succeed even with the NaNJacSimulator
+  auto data = make_id_data({10.0, 20.0, 30.0});
+  auto base = Params::defaults_t1d();
+  ObservationCost<NaNJacSimulator> obs_cost(data, base,
+                                            {{"kp1", 0, 1}, {"kp2", 0, 1}});
+
+  std::vector<double> params = {0.5, -0.3};
+  const double* params_ptr = params.data();
+  int n_obs = obs_cost.n_obs_;
+  int n_params = obs_cost.n_params_;
+  std::vector<double> resid(n_obs);
+  std::vector<double> jac_buf(n_obs * n_params);
+  double* jac_ptrs[] = { jac_buf.data() };
+
+  // Salvage zeros out NaN derivatives, so Evaluate should pass
+  bool result = obs_cost.Evaluate(&params_ptr, resid.data(), jac_ptrs);
+  EXPECT_TRUE(result);
+  for (int i = 0; i < n_obs * n_params; ++i)
+    EXPECT_TRUE(std::isfinite(jac_buf[i]));
+}
+
+TEST(NaNJacobianTest, compute_raw_gradients_recovers_via_salvage) {
+  auto data = make_id_data({10.0, 20.0, 30.0});
+  auto base = Params::defaults_t1d();
+  ObservationCost<NaNJacSimulator> obs_cost(data, base,
+                                            {{"kp1", 0, 1}, {"kp2", 0, 1}});
+
+  std::vector<double> params = {0.5, -0.3};
+  std::vector<double> raw_resid;
+  Eigen::MatrixXd J_raw;
+
+  bool ok = obs_cost.compute_raw_gradients(params.data(), raw_resid, J_raw);
+  EXPECT_TRUE(ok);
+  EXPECT_TRUE(J_raw.allFinite());
+}
+
+TEST(NaNJacobianTest, lm_with_nan_simulator_does_not_crash) {
+  auto data = make_id_data({1.0, 2.0, 3.0});
+  auto base = Params::defaults_t1d();
+  ObservationCost<NaNValSimulator> obs_cost(data, base,
+                                            {{"kp1", 0, 1}, {"kp2", 0, 1}});
+  PriorCost prior({{"kp1", 0, 1}, {"kp2", 0, 2}});
+
+  EXPECT_NO_THROW({
+    auto res = LMOptimizer::run({0.0, 0.0}, obs_cost, prior, 10);
+    EXPECT_TRUE(std::isfinite(res.final_cost));
+    EXPECT_EQ(res.cov.rows(), 2);
+    EXPECT_EQ(res.cov.cols(), 2);
+  });
+}
+
+TEST(NaNJacobianTest, lm_falls_back_gracefully_on_nan_jacobian) {
+  auto data = make_id_data({10.0, 20.0, 30.0});
+  auto base = Params::defaults_t1d();
+  ObservationCost<NaNJacSimulator> obs_cost(data, base,
+                                            {{"kp1", 0, 1}, {"kp2", 0, 1}});
+  PriorCost prior({{"kp1", 0, 1}, {"kp2", 0, 2}});
+
+  EXPECT_NO_THROW({
+    auto res = LMOptimizer::run({0.0, 0.0}, obs_cost, prior, 10);
+    EXPECT_TRUE(std::isfinite(res.final_cost));
+    EXPECT_EQ(res.cov.rows(), 2);
+    EXPECT_EQ(res.cov.cols(), 2);
+  });
+}
+
+TEST(NaNJacobianTest, validate_jacobian_passes_for_clean) {
+  auto data = make_id_data({10.0, 20.0, 30.0});
+  auto base = Params::defaults_t1d();
+  ObservationCost<LinearMockSimulator> obs_cost(data, base,
+                                                {{"kp1", 0, 1}});
+
+  std::vector<double> params = {0.5};
+  bool valid = detail::validate_jacobian(obs_cost, params);
+
+  EXPECT_TRUE(valid);
+}
+
 TEST_F(LMRosenbrockTest, numerical_hessian_matches_analytic) {
   auto obs_cost = make_rosenbrock_cost();
   auto prior = make_rosenbrock_prior();

@@ -65,6 +65,8 @@ LMOptimizer::Result LMOptimizer::run(
   options.function_tolerance = 1e-8;
   options.gradient_tolerance = 1e-10;
   options.parameter_tolerance = 1e-8;
+  options.initial_trust_region_radius = 1e2;   // τ = 1e-2, Madsen-Nielsen-Tingleff §6.2
+  options.max_trust_region_radius = 1e6;       // prevents runaway radius growth
   options.minimizer_progress_to_stdout = true;
   options.logging_type = ceres::PER_MINIMIZER_ITERATION;
 

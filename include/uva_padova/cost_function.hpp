@@ -6,7 +6,7 @@
 #include <cmath>
 #include <numeric>
 
-#include <Eigen/Core>
+#include <Eigen/Dense>
 #include <ceres/jet.h>
 
 #include <ceres/cost_function.h>
@@ -248,34 +248,114 @@ struct ObservationCost : ceres::CostFunction {
         state.at(i) = T(ss_state.at(i));
       basal_rate = T(insulin_ss);
     } else {
-      const double eps = 1e-6;
-
-      double theta_double[kMaxJetDim];
-      for (int i = 0; i < n_params_; ++i)
-        theta_double[i] = extract_val(params[i]);
-
       Eigen::Matrix<double, kMaxJetDim, 1> di_ss;
       di_ss.setZero();
       using AlignedMat = Eigen::Matrix<double, kMaxJetDim, 1>;
       std::vector<AlignedMat, Eigen::aligned_allocator<AlignedMat>> dstate(BasicState<T>::kSize);
       for (auto& v : dstate) v.setZero();
 
-      for (int pi = 0; pi < n_params_; ++pi) {
-        double saved = theta_double[pi];
-        theta_double[pi] += eps;
+      // --- Implicit Function Theorem: differentiate SS system w.r.t. θ ---
+      // At the converged SS: F(x_ss, u_basal, p(θ)) = 0  (14 ODE equations)
+      //                      h(x_ss, p(θ)) = Gp/VG - Gb  (glucose target)
+      // Differentiating:
+      //   [∂F/∂x  ∂F/∂u] [dx/dθ]   = -[∂F/∂θ]
+      //   [∂h/∂x   0   ] [du/dθ]     -[∂h/∂θ]
+      // One Jet<30> RHS evaluation gives all partials simultaneously.
+      // Note: kMaxJetDim=30 is used as the Jet dimension; the state (14),
+      // u_basal (1), and active params (≤ 9) fit with capacity to spare.
+      constexpr int kStateDim = BasicState<T>::kSize;  // 14
+      using JetAll = ceres::Jet<double, kMaxJetDim>;
 
-        BasicParams<double> p_pert;
-        copy_params(base_params_, p_pert);
-        apply_adjustments(theta_double, p_pert);
+      BasicState<JetAll> ss_jet;
+      for (int j = 0; j < kStateDim; ++j)
+        ss_jet.at(j) = JetAll(ss_state.at(j), j);
 
-        State ss_pert;
-        double i_ss_pert = Simulator::find_steady_state(ss_pert, p_pert, p_pert.Gb);
+      BasicInputs<JetAll> u_jet;
+      u_jet.insulin_rate = JetAll(insulin_ss, kStateDim);
 
-        double inv_eps = 1.0 / eps;
-        for (int j = 0; j < BasicState<T>::kSize; ++j)
-          dstate[j][pi] = (ss_pert.at(j) - ss_state.at(j)) * inv_eps;
-        di_ss[pi] = (i_ss_pert - insulin_ss) * inv_eps;
-        theta_double[pi] = saved;
+      BasicParams<JetAll> p_jet;
+      copy_params(base_params_, p_jet);
+      std::vector<JetAll> theta_jet(n_params_);
+      for (int pi = 0; pi < n_params_; ++pi)
+        theta_jet[pi] = JetAll(extract_val(params[pi]), kStateDim + 1 + pi);
+      apply_adjustments(theta_jet.data(), p_jet);
+
+      auto rhs_all = UvaPadovaODESystem::rhs(ss_jet, u_jet, p_jet);
+
+      Eigen::Matrix<double, kStateDim, kStateDim + 1> J_xu;
+      Eigen::Matrix<double, kStateDim, Eigen::Dynamic> J_theta(kStateDim, n_params_);
+      for (int j = 0; j < kStateDim; ++j) {
+        auto& dx_j = rhs_all.at(j);
+        for (int k = 0; k < kStateDim; ++k)
+          J_xu(j, k) = dx_j.v[k];
+        J_xu(j, kStateDim) = dx_j.v[kStateDim];
+        for (int pi = 0; pi < n_params_; ++pi)
+          J_theta(j, pi) = dx_j.v[kStateDim + 1 + pi];
+      }
+
+      Eigen::Matrix<double, 1, kStateDim> dh_dx;
+      dh_dx.setZero();
+      dh_dx(0) = 1.0 / p_double.VG;
+
+      Eigen::Matrix<double, 1, Eigen::Dynamic> dh_dtheta(1, n_params_);
+      dh_dtheta.setZero();
+      for (int pi = 0; pi < n_params_; ++pi)
+        if (param_desc_[pi].name == "Gb")
+          dh_dtheta(pi) = -p_double.Gb;
+
+      Eigen::Matrix<double, kStateDim + 1, kStateDim + 1> M;
+      M.topLeftCorner(kStateDim, kStateDim + 1) = J_xu;
+      M.template bottomRows<1>().leftCols(kStateDim) = dh_dx;
+      M(kStateDim, kStateDim) = 0.0;
+
+      Eigen::Matrix<double, kStateDim + 1, Eigen::Dynamic> RHS(kStateDim + 1, n_params_);
+      RHS.topRows(kStateDim) = -J_theta;
+      RHS.template bottomRows<1>() = -dh_dtheta;
+
+      bool implicit_ok = true;
+      Eigen::Matrix<double, kStateDim + 1, Eigen::Dynamic> S(kStateDim + 1, n_params_);
+      {
+        auto qr = M.colPivHouseholderQr();
+        qr.setThreshold(1e-30);
+        if (qr.rank() < kStateDim + 1) {
+          implicit_ok = false;
+        } else {
+          S = qr.solve(RHS);
+          if (!S.allFinite())
+            implicit_ok = false;
+        }
+      }
+
+      if (implicit_ok) {
+        for (int pi = 0; pi < n_params_; ++pi) {
+          di_ss[pi] = S(kStateDim, pi);
+          for (int j = 0; j < kStateDim; ++j)
+            dstate[j][pi] = S(j, pi);
+        }
+      } else {
+      // Fallback: finite differences (if implicit approach failed or dim mismatch)
+        const double eps = 1e-6;
+        double theta_double[kMaxJetDim];
+        for (int i = 0; i < n_params_; ++i)
+          theta_double[i] = extract_val(params[i]);
+
+        for (int pi = 0; pi < n_params_; ++pi) {
+          double saved = theta_double[pi];
+          theta_double[pi] += eps;
+
+          BasicParams<double> p_pert;
+          copy_params(base_params_, p_pert);
+          apply_adjustments(theta_double, p_pert);
+
+          State ss_pert;
+          double i_ss_pert = Simulator::find_steady_state(ss_pert, p_pert, p_pert.Gb);
+
+          double inv_eps = 1.0 / eps;
+          for (int j = 0; j < BasicState<T>::kSize; ++j)
+            dstate[j][pi] = (ss_pert.at(j) - ss_state.at(j)) * inv_eps;
+          di_ss[pi] = (i_ss_pert - insulin_ss) * inv_eps;
+          theta_double[pi] = saved;
+        }
       }
 
       for (int j = 0; j < BasicState<T>::kSize; ++j)

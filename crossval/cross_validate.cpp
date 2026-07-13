@@ -506,8 +506,20 @@ int main(int argc, char** argv) {
       double cost_true = sanity_cost.compute_scalar_cost(vp.theta_true.data());
       std::cout << "  [sanity] cost(θ=0)     = " << cost_base << "\n";
       std::cout << "  [sanity] cost(θ=true)  = " << cost_true << "\n";
+      bool data_has_noise = (cfg.cgm_noise.fixed_sd > 0 ||
+                             cfg.cgm_noise.relative_sd > 0 ||
+                             cfg.cgm_noise.dropout_prob > 0 ||
+                             cfg.meal_errors.timing_shift_sd > 0 ||
+                             cfg.meal_errors.skip_prob > 0 ||
+                             cfg.meal_errors.amount_noise_sd > 0);
       if (cost_true > 1.0) {
-        std::cout << "  [sanity] *** WARNING: cost(θ=true) >> 0 — model mismatch or clamp issue\n";
+        if (data_has_noise) {
+          std::cout << "  [sanity] (cost>0 expected — noisy data)\n";
+        } else {
+          std::cerr << "ERROR: cost(θ=true)=" << cost_true
+                    << " with clean data — model mismatch or clamp bug\n";
+          return 1;
+        }
       }
     }
 

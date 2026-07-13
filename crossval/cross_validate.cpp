@@ -34,47 +34,6 @@ struct CoutSilencer {
 };
 
 // ===========================================================================
-// Extract parameter value from Params by name
-// ===========================================================================
-static double get_param_value(const Params& p, const std::string& name) {
-  if (name == "VG")   return p.VG;
-  if (name == "k1")   return p.k1;
-  if (name == "k2")   return p.k2;
-  if (name == "VI")   return p.VI;
-  if (name == "m1")   return p.m1;
-  if (name == "m2")   return p.m2;
-  if (name == "m4")   return p.m4;
-  if (name == "kmax") return p.kmax;
-  if (name == "kmin") return p.kmin;
-  if (name == "kabs") return p.kabs;
-  if (name == "kgri") return p.kgri;
-  if (name == "f")    return p.f;
-  if (name == "b")    return p.b;
-  if (name == "d")    return p.d;
-  if (name == "kp1")  return p.kp1;
-  if (name == "kp2")  return p.kp2;
-  if (name == "kp3")  return p.kp3;
-  if (name == "ki")   return p.ki;
-  if (name == "Fcns") return p.Fcns;
-  if (name == "Vm0")  return p.Vm0;
-  if (name == "Vmx")  return p.Vmx;
-  if (name == "Km0")  return p.Km0;
-  if (name == "p2U")  return p.p2U;
-  if (name == "r1")   return p.r1;
-  if (name == "Gth")  return p.Gth;
-  if (name == "ke1")  return p.ke1;
-  if (name == "ke2")  return p.ke2;
-  if (name == "ka1")  return p.ka1;
-  if (name == "ka2")  return p.ka2;
-  if (name == "kd")   return p.kd;
-  if (name == "Ts")   return p.Ts;
-  if (name == "BW")   return p.BW;
-  if (name == "Gb")   return p.Gb;
-  if (name == "Ib")   return p.Ib;
-  return 0.0;
-}
-
-// ===========================================================================
 // CSV writing
 // ===========================================================================
 static void write_csv_header(std::ofstream& csv, const std::vector<ParamDescriptor>& desc) {
@@ -162,14 +121,14 @@ static json build_json_result(int pid, const IdentificationPipeline<>::Result& i
       theta_rec.push_back(ires.params[i]);
       err.push_back(abs_err[i]);
       err_phys.push_back(abs_err_phys[i]);
-      rec_phys.push_back(get_param_value(recovered, name));
-      true_phys.push_back(get_param_value(vp.true_params, name));
+      rec_phys.push_back(param_value(recovered, name));
+      true_phys.push_back(param_value(vp.true_params, name));
     } else {
       theta_rec.push_back(nullptr);
       err.push_back(nullptr);
       err_phys.push_back(nullptr);
       rec_phys.push_back(nullptr);
-      true_phys.push_back(get_param_value(vp.true_params, name));
+      true_phys.push_back(param_value(vp.true_params, name));
     }
   }
   j["theta_true"] = std::move(theta_true);
@@ -605,8 +564,8 @@ int main(int argc, char** argv) {
         double t = vp.theta_true[i];
         double r = ires.params[i];
         abs_err[i] = std::abs(r - t);
-        double pt = get_param_value(vp.true_params, vp.active_desc[i].name);
-        double pr = get_param_value(recovered_params, vp.active_desc[i].name);
+        double pt = param_value(vp.true_params, vp.active_desc[i].name);
+        double pr = param_value(recovered_params, vp.active_desc[i].name);
         abs_err_phys[i] = std::abs(pr - pt);
         all_abs_err.push_back(abs_err[i]);
       }

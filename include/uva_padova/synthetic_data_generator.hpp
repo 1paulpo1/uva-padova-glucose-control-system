@@ -37,26 +37,6 @@ struct SyntheticDataResult {
 };
 
 // ---------------------------------------------------------------------------
-// Extract a parameter value from Params by name
-// ---------------------------------------------------------------------------
-inline double param_value(const Params& p, const std::string& name) {
-  if (name == "VG")   return p.VG;   if (name == "k1")   return p.k1;   if (name == "k2")   return p.k2;
-  if (name == "VI")   return p.VI;   if (name == "m1")   return p.m1;   if (name == "m2")   return p.m2;
-  if (name == "m4")   return p.m4;   if (name == "kmax") return p.kmax; if (name == "kmin") return p.kmin;
-  if (name == "kabs") return p.kabs; if (name == "kgri") return p.kgri; if (name == "f")    return p.f;
-  if (name == "b")    return p.b;    if (name == "d")    return p.d;
-  if (name == "kp1")  return p.kp1;  if (name == "kp2")  return p.kp2;  if (name == "kp3")  return p.kp3;
-  if (name == "Vm0")  return p.Vm0;  if (name == "Vmx")  return p.Vmx;  if (name == "p2U")  return p.p2U;
-  if (name == "ka1")  return p.ka1;  if (name == "ka2")  return p.ka2;  if (name == "kd")   return p.kd;   if (name == "ki")   return p.ki;
-  if (name == "Fcns") return p.Fcns; if (name == "Km0")  return p.Km0;
-  if (name == "r1")   return p.r1;   if (name == "Gth")  return p.Gth;
-  if (name == "ke1")  return p.ke1;  if (name == "ke2")  return p.ke2;
-  if (name == "Ts")   return p.Ts;   if (name == "BW")   return p.BW;
-  if (name == "Gb")   return p.Gb;   if (name == "Ib")   return p.Ib;
-  return 1.0;
-}
-
-// ---------------------------------------------------------------------------
 // Compute log-space theta from true and base params
 //   theta[i] = log(true_params.field_i / base_params.field_i)
 // ---------------------------------------------------------------------------

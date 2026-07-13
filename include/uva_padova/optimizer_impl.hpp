@@ -358,42 +358,7 @@ Params IdentificationPipeline<CMAES, LM>::Result::to_params(
     if (theta_idx >= params.size()) break;
     double mult = std::exp(params[theta_idx]);
     if (!std::isfinite(mult)) mult = 1.0;
-
-    if (desc[i].name == "kp1")  p.kp1  *= mult;
-    if (desc[i].name == "kp2")  p.kp2  *= mult;
-    if (desc[i].name == "kp3")  p.kp3  *= mult;
-    if (desc[i].name == "Vm0")  p.Vm0  *= mult;
-    if (desc[i].name == "Vmx")  p.Vmx  *= mult;
-    if (desc[i].name == "p2U")  p.p2U  *= mult;
-    if (desc[i].name == "ka1")  p.ka1  *= mult;
-    if (desc[i].name == "ka2")  p.ka2  *= mult;
-    if (desc[i].name == "kd")   p.kd   *= mult;
-    if (desc[i].name == "kmax") p.kmax *= mult;
-    if (desc[i].name == "kmin") p.kmin *= mult;
-    if (desc[i].name == "kabs") p.kabs *= mult;
-    if (desc[i].name == "kgri") p.kgri *= mult;
-    if (desc[i].name == "VG")   p.VG   *= mult;
-    if (desc[i].name == "VI")   p.VI   *= mult;
-    if (desc[i].name == "Gb")   p.Gb   *= mult;
-    if (desc[i].name == "Ib")   p.Ib   *= mult;
-    if (desc[i].name == "k1")   p.k1   *= mult;
-    if (desc[i].name == "k2")   p.k2   *= mult;
-    if (desc[i].name == "m1")   p.m1   *= mult;
-    if (desc[i].name == "m2")   p.m2   *= mult;
-    if (desc[i].name == "m4")   p.m4   *= mult;
-    if (desc[i].name == "ki")   p.ki   *= mult;
-    if (desc[i].name == "f")    p.f    *= mult;
-    if (desc[i].name == "b")    p.b    *= mult;
-    if (desc[i].name == "d")    p.d    *= mult;
-    if (desc[i].name == "ke1")  p.ke1  *= mult;
-    if (desc[i].name == "ke2")  p.ke2  *= mult;
-    if (desc[i].name == "Ts")   p.Ts   *= mult;
-    if (desc[i].name == "r1")   p.r1   *= mult;
-    if (desc[i].name == "Gth")  p.Gth  *= mult;
-    if (desc[i].name == "BW")   p.BW   *= mult;
-    if (desc[i].name == "Fcns") p.Fcns *= mult;
-    if (desc[i].name == "Km0")  p.Km0  *= mult;
-
+    param_by_id(p, param_id_from_string(desc[i].name)) *= mult;
     ++theta_idx;
   }
   return p;

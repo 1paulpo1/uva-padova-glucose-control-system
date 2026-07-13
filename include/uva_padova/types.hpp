@@ -2,9 +2,48 @@
 
 #include <cstdint>
 #include <cmath>
+#include <string>
 #include <type_traits>
+#include <stdexcept>
 
 namespace uva_padova {
+
+// ---------------------------------------------------------------------------
+// Parameter ID enum — single source of truth for param name ↔ field mapping
+// ---------------------------------------------------------------------------
+enum class ParamId : int {
+  VG, k1, k2, VI, m1, m2, m4, kmax, kmin, kabs, kgri, f, b, d,
+  kp1, kp2, kp3, ki, Fcns, Vm0, Vmx, Km0, p2U, r1, Gth,
+  ke1, ke2, ka1, ka2, kd, Ts, BW, Gb, Ib,
+  COUNT
+};
+
+inline const std::string& param_name(ParamId id) {
+  static const std::string names[] = {
+    "VG", "k1", "k2", "VI", "m1", "m2", "m4", "kmax", "kmin",
+    "kabs", "kgri", "f", "b", "d",
+    "kp1", "kp2", "kp3", "ki", "Fcns", "Vm0", "Vmx", "Km0",
+    "p2U", "r1", "Gth",
+    "ke1", "ke2", "ka1", "ka2", "kd",
+    "Ts", "BW", "Gb", "Ib"
+  };
+  return names[static_cast<int>(id)];
+}
+
+inline ParamId param_id_from_string(const std::string& name) {
+  static const char* names[] = {
+    "VG", "k1", "k2", "VI", "m1", "m2", "m4", "kmax", "kmin",
+    "kabs", "kgri", "f", "b", "d",
+    "kp1", "kp2", "kp3", "ki", "Fcns", "Vm0", "Vmx", "Km0",
+    "p2U", "r1", "Gth",
+    "ke1", "ke2", "ka1", "ka2", "kd",
+    "Ts", "BW", "Gb", "Ib"
+  };
+  for (int i = 0; i < static_cast<int>(ParamId::COUNT); ++i) {
+    if (name == names[i]) return static_cast<ParamId>(i);
+  }
+  throw std::out_of_range("unknown parameter name: " + name);
+}
 
 // ---------------------------------------------------------------------------
 // Primary state vector for the reduced T1DM single-hormone model.
@@ -109,6 +148,44 @@ struct BasicParams {
 using State   = BasicState<double>;
 using Inputs  = BasicInputs<double>;
 using Params  = BasicParams<double>;
+
+// ---------------------------------------------------------------------------
+// ParamId → BasicParams<T> field access — single source of truth
+// ---------------------------------------------------------------------------
+template<typename T>
+inline T& param_by_id(BasicParams<T>& p, ParamId id) {
+  switch (id) {
+    case ParamId::VG:   return p.VG;   case ParamId::k1:   return p.k1;   case ParamId::k2:   return p.k2;
+    case ParamId::VI:   return p.VI;   case ParamId::m1:   return p.m1;   case ParamId::m2:   return p.m2;
+    case ParamId::m4:   return p.m4;
+    case ParamId::kmax: return p.kmax; case ParamId::kmin: return p.kmin;
+    case ParamId::kabs: return p.kabs; case ParamId::kgri: return p.kgri;
+    case ParamId::f:    return p.f;    case ParamId::b:    return p.b;    case ParamId::d:    return p.d;
+    case ParamId::kp1:  return p.kp1;  case ParamId::kp2:  return p.kp2;  case ParamId::kp3:  return p.kp3;
+    case ParamId::ki:   return p.ki;
+    case ParamId::Fcns: return p.Fcns; case ParamId::Vm0:  return p.Vm0;  case ParamId::Vmx:  return p.Vmx;
+    case ParamId::Km0:  return p.Km0;  case ParamId::p2U:  return p.p2U;
+    case ParamId::r1:   return p.r1;   case ParamId::Gth:  return p.Gth;
+    case ParamId::ke1:  return p.ke1;  case ParamId::ke2:  return p.ke2;
+    case ParamId::ka1:  return p.ka1;  case ParamId::ka2:  return p.ka2;  case ParamId::kd:   return p.kd;
+    case ParamId::Ts:   return p.Ts;
+    case ParamId::BW:   return p.BW;   case ParamId::Gb:   return p.Gb;   case ParamId::Ib:   return p.Ib;
+    default: __builtin_trap();
+  }
+}
+
+template<typename T>
+inline const T& param_by_id(const BasicParams<T>& p, ParamId id) {
+  return param_by_id(const_cast<BasicParams<T>&>(p), id);
+}
+
+// Convenience: double-only extractor
+inline double param_value(const Params& p, ParamId id) {
+  return param_by_id(p, id);
+}
+inline double param_value(const Params& p, const std::string& name) {
+  return param_value(p, param_id_from_string(name));
+}
 
 // ---------------------------------------------------------------------------
 // Observation: CGM reading (subcutaneous glucose)

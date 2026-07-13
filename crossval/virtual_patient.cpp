@@ -23,41 +23,7 @@ Params apply_theta_to_params(
   for (size_t i = 0; i < theta.size() && i < desc.size(); ++i) {
     double mult = std::exp(theta[i]);
     if (!std::isfinite(mult)) mult = 1.0;
-
-    if (desc[i].name == "kp1")  p.kp1  *= mult;
-    else if (desc[i].name == "kp2")  p.kp2  *= mult;
-    else if (desc[i].name == "kp3")  p.kp3  *= mult;
-    else if (desc[i].name == "Vm0")  p.Vm0  *= mult;
-    else if (desc[i].name == "Vmx")  p.Vmx  *= mult;
-    else if (desc[i].name == "p2U")  p.p2U  *= mult;
-    else if (desc[i].name == "ka1")  p.ka1  *= mult;
-    else if (desc[i].name == "ka2")  p.ka2  *= mult;
-    else if (desc[i].name == "kd")   p.kd   *= mult;
-    else if (desc[i].name == "kmax") p.kmax *= mult;
-    else if (desc[i].name == "kmin") p.kmin *= mult;
-    else if (desc[i].name == "kabs") p.kabs *= mult;
-    else if (desc[i].name == "kgri") p.kgri *= mult;
-    else if (desc[i].name == "VG")   p.VG   *= mult;
-    else if (desc[i].name == "VI")   p.VI   *= mult;
-    else if (desc[i].name == "Gb")   p.Gb   *= mult;
-    else if (desc[i].name == "Ib")   p.Ib   *= mult;
-    else if (desc[i].name == "k1")   p.k1   *= mult;
-    else if (desc[i].name == "k2")   p.k2   *= mult;
-    else if (desc[i].name == "m1")   p.m1   *= mult;
-    else if (desc[i].name == "m2")   p.m2   *= mult;
-    else if (desc[i].name == "m4")   p.m4   *= mult;
-    else if (desc[i].name == "ki")   p.ki   *= mult;
-    else if (desc[i].name == "f")    p.f    *= mult;
-    else if (desc[i].name == "b")    p.b    *= mult;
-    else if (desc[i].name == "d")    p.d    *= mult;
-    else if (desc[i].name == "ke1")  p.ke1  *= mult;
-    else if (desc[i].name == "ke2")  p.ke2  *= mult;
-    else if (desc[i].name == "Ts")   p.Ts   *= mult;
-    else if (desc[i].name == "r1")   p.r1   *= mult;
-    else if (desc[i].name == "Gth")  p.Gth  *= mult;
-    else if (desc[i].name == "BW")   p.BW   *= mult;
-    else if (desc[i].name == "Fcns") p.Fcns *= mult;
-    else if (desc[i].name == "Km0")  p.Km0  *= mult;
+    param_by_id(p, param_id_from_string(desc[i].name)) *= mult;
   }
   return p;
 }

@@ -386,7 +386,6 @@ struct ObservationCost : ceres::CostFunction {
   template<typename T>
   void apply_adjustments(const T* theta, BasicParams<T>& p) const {
     for (int i = 0; i < n_params_; ++i) {
-      const auto& desc = param_desc_[i];
       T multiplier = exp(theta[i]);
       if (!scalar_is_finite(multiplier)) {
         if constexpr (std::is_same_v<T, double>) {
@@ -396,41 +395,7 @@ struct ObservationCost : ceres::CostFunction {
           multiplier.v.setZero();
         }
       }
-
-      if (desc.name == "kp1")  p.kp1  *= multiplier;
-      if (desc.name == "kp2")  p.kp2  *= multiplier;
-      if (desc.name == "kp3")  p.kp3  *= multiplier;
-      if (desc.name == "Vm0")  p.Vm0  *= multiplier;
-      if (desc.name == "Vmx")  p.Vmx  *= multiplier;
-      if (desc.name == "p2U")  p.p2U  *= multiplier;
-      if (desc.name == "ka1")  p.ka1  *= multiplier;
-      if (desc.name == "ka2")  p.ka2  *= multiplier;
-      if (desc.name == "kd")   p.kd   *= multiplier;
-      if (desc.name == "kmax") p.kmax *= multiplier;
-      if (desc.name == "kmin") p.kmin *= multiplier;
-      if (desc.name == "kabs") p.kabs *= multiplier;
-      if (desc.name == "kgri") p.kgri *= multiplier;
-      if (desc.name == "VG")   p.VG   *= multiplier;
-      if (desc.name == "VI")   p.VI   *= multiplier;
-      if (desc.name == "Gb")   p.Gb   *= multiplier;
-      if (desc.name == "Ib")   p.Ib   *= multiplier;
-      if (desc.name == "k1")   p.k1   *= multiplier;
-      if (desc.name == "k2")   p.k2   *= multiplier;
-      if (desc.name == "m1")   p.m1   *= multiplier;
-      if (desc.name == "m2")   p.m2   *= multiplier;
-      if (desc.name == "m4")   p.m4   *= multiplier;
-      if (desc.name == "ki")   p.ki   *= multiplier;
-      if (desc.name == "f")    p.f    *= multiplier;
-      if (desc.name == "b")    p.b    *= multiplier;
-      if (desc.name == "d")    p.d    *= multiplier;
-      if (desc.name == "ke1")  p.ke1  *= multiplier;
-      if (desc.name == "ke2")  p.ke2  *= multiplier;
-      if (desc.name == "Ts")   p.Ts   *= multiplier;
-      if (desc.name == "r1")   p.r1   *= multiplier;
-      if (desc.name == "Gth")  p.Gth  *= multiplier;
-      if (desc.name == "BW")   p.BW   *= multiplier;
-      if (desc.name == "Fcns") p.Fcns *= multiplier;
-      if (desc.name == "Km0")  p.Km0  *= multiplier;
+      param_by_id(p, param_id_from_string(param_desc_[i].name)) *= multiplier;
     }
   }
 

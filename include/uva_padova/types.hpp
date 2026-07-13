@@ -258,9 +258,17 @@ bool BasicState<T>::all_finite() const {
 
 template<typename T>
 void BasicState<T>::clamp_physiological() {
-  auto clamp_val = [](T& v, T lo, T hi) {
-    if (v < lo) v = lo;
-    if (v > hi) v = hi;
+  // Smooth clamp for all types: differentiable softplus-based saturation.
+  //   smooth_clamp(v, lo, hi) = v - softplus(v - hi) + softplus(lo - v)
+  // Keeps double and Jet paths identical — consistent cost, clean gradients.
+  using std::log; using std::exp;
+  auto softplus = [](const T& x) -> T {
+    if (x > T(30)) return x;
+    if (x < T(-30)) return T(0);
+    return log(T(1) + exp(x));
+  };
+  auto clamp_val = [&](T& v, T lo, T hi) {
+    v = v - softplus(v - hi) + softplus(lo - v);
   };
   clamp_val(Gp,    T(0),    T(1000));
   clamp_val(Gt,    T(0),    T(1000));

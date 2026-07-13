@@ -498,6 +498,19 @@ int main(int argc, char** argv) {
         d.prior_std = prior_std;
     }
 
+    // --- Sanity: cost(θ) at true and base parameters ---
+    {
+      ObservationCost<> sanity_cost(vp.data, vp.base_params, vp.active_desc);
+      std::vector<double> theta_zero(vp.active_desc.size(), 0.0);
+      double cost_base = sanity_cost.compute_scalar_cost(theta_zero.data());
+      double cost_true = sanity_cost.compute_scalar_cost(vp.theta_true.data());
+      std::cout << "  [sanity] cost(θ=0)     = " << cost_base << "\n";
+      std::cout << "  [sanity] cost(θ=true)  = " << cost_true << "\n";
+      if (cost_true > 1.0) {
+        std::cout << "  [sanity] *** WARNING: cost(θ=true) >> 0 — model mismatch or clamp issue\n";
+      }
+    }
+
     // 2. Data (dropouts already filtered by generator)
     auto& id_data = vp.data;
 

@@ -46,7 +46,7 @@ struct RK4Integrator {
                                  + T(2.0) * k3.at(i) + k4.at(i));
     }
 
-    // Physiological clamping (hard for double, smooth for Jet)
+    // Smooth physiological clamping (differentiable, consistent across types)
     x.clamp_physiological();
   }
 
@@ -118,7 +118,7 @@ struct RK5Integrator {
                     + T(11.0/84.0) * k6.at(i));
     }
 
-    // Safety clamp — only active for double
+    // Smooth physiological clamping (differentiable, consistent across types)
     x.clamp_physiological();
   }
 };

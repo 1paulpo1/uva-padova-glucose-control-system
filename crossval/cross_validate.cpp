@@ -88,6 +88,12 @@ static json eigen_to_json(const Eigen::MatrixXd& m) {
   return j;
 }
 
+static json vec_to_json(const std::vector<double>& v) {
+  json j = json::array();
+  for (double x : v) j.push_back(x);
+  return j;
+}
+
 static json build_json_result(int pid, const IdentificationPipeline<>::Result& ires,
                               const VirtualPatientResult& vp,
                               const GateAResult& ga, const GateBResult& gb, const GateCResult& gc,
@@ -215,6 +221,26 @@ static json build_json_result(int pid, const IdentificationPipeline<>::Result& i
     for (double v : cgm_residuals) res.push_back(v);
     j["cgm_residuals"] = std::move(res);
   }
+
+  // Input data (observed)
+  j["input"]["cgm_time"] = vec_to_json(vp.data.cgm_time);
+  j["input"]["cgm_value"] = vec_to_json(vp.data.cgm_value);
+  j["input"]["meal_time"] = vec_to_json(vp.data.meal_time);
+  j["input"]["meal_cho"] = vec_to_json(vp.data.meal_cho);
+  j["input"]["insulin_time"] = vec_to_json(vp.data.insulin_time);
+  j["input"]["insulin_rate"] = vec_to_json(vp.data.insulin_rate);
+  j["input"]["bolus_time"] = vec_to_json(vp.data.bolus_time);
+  j["input"]["bolus_dose"] = vec_to_json(vp.data.bolus_dose);
+
+  // True input data (clean, no noise/errors)
+  j["true_input"]["cgm_time"] = vec_to_json(vp.true_data.cgm_time);
+  j["true_input"]["cgm_value"] = vec_to_json(vp.true_data.cgm_value);
+  j["true_input"]["meal_time"] = vec_to_json(vp.true_data.meal_time);
+  j["true_input"]["meal_cho"] = vec_to_json(vp.true_data.meal_cho);
+  j["true_input"]["insulin_time"] = vec_to_json(vp.true_data.insulin_time);
+  j["true_input"]["insulin_rate"] = vec_to_json(vp.true_data.insulin_rate);
+  j["true_input"]["bolus_time"] = vec_to_json(vp.true_data.bolus_time);
+  j["true_input"]["bolus_dose"] = vec_to_json(vp.true_data.bolus_dose);
 
   return j;
 }

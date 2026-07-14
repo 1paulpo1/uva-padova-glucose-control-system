@@ -7,10 +7,8 @@ Usage: python3 analyze_results.py [--json crossval_results.json]
 import json
 import sys
 import os
-import math
 import argparse
 import logging
-from collections import defaultdict
 
 try:
     import numpy as np
@@ -40,6 +38,70 @@ def get_successful(results):
     return [r for r in results if r.get("success", False)]
 
 
+def precompute(results, n_params):
+    """Build dict of centralized numpy arrays from a results list.
+
+    Returns a dict with:
+      - scalar arrays (N,): patient_id, cost, best_cma_cost, success,
+        ga_pass, gb_pass, n_clusters, gc_dominated,
+        total_evals, cmaes_evals, lm_evals, cost_improvement_pct
+      - 2D arrays (N, P) or None: theta_true, theta_rec, abs_err_log,
+        param_true_phys, param_rec_phys, abs_err_phys
+    """
+    n = len(results)
+    p = n_params
+    d = {}
+
+    # Scalars
+    d["patient_id"] = np.array([r.get("patient_id", -1) for r in results])
+    d["cost"] = np.array([r.get("cost", float("nan")) for r in results], dtype=float)
+    d["best_cma_cost"] = np.array([r.get("best_cma_cost", float("nan")) for r in results], dtype=float)
+    d["success"] = np.array([r.get("success", False) for r in results], dtype=bool)
+    d["ga_pass"] = np.array([r.get("gate_a", {}).get("passed", False) for r in results], dtype=bool)
+    d["gb_pass"] = np.array([r.get("gate_b", {}).get("passed", False) for r in results], dtype=bool)
+    d["n_clusters"] = np.array([r.get("gate_a", {}).get("n_clusters", 0) for r in results], dtype=int)
+    d["gc_dominated"] = np.array([r.get("gate_c", {}).get("n_prior_dominated", 0) for r in results], dtype=int)
+    d["total_evals"] = np.array([r.get("total_evals", 0) for r in results], dtype=float)
+    d["cmaes_evals"] = np.array([r.get("cmaes_evals", 0) for r in results], dtype=float)
+    d["lm_evals"] = np.array([r.get("lm_evals", 0) for r in results], dtype=float)
+
+    # Cost improvement (precomputed)
+    bcc = d["best_cma_cost"]
+    final = d["cost"]
+    imp = np.full(n, float("nan"))
+    mask = (bcc > 0) & (bcc < 1e10) & ~np.isnan(bcc) & ~np.isnan(final)
+    imp[mask] = (bcc[mask] - final[mask]) / bcc[mask] * 100
+    d["cost_improvement_pct"] = imp
+
+    # Matrix fields (N x P or None)
+    def build_matrix(key, null_ok=False):
+        rows = []
+        for r in results:
+            v = r.get(key)
+            if v is None or len(v) < p:
+                rows.append(None)
+            else:
+                rows.append(v)
+        if null_ok and all(r is None for r in rows):
+            return None
+        out = np.full((n, p), float("nan"))
+        for i, row in enumerate(rows):
+            if row is not None:
+                for j in range(p):
+                    if j < len(row) and row[j] is not None:
+                        out[i, j] = row[j]
+        return out
+
+    d["theta_true"] = build_matrix("theta_true")
+    d["theta_rec"] = build_matrix("theta_rec")
+    d["abs_err_log"] = build_matrix("abs_err_log")
+    d["param_true_phys"] = build_matrix("param_true_phys")
+    d["param_rec_phys"] = build_matrix("param_rec_phys")
+    d["abs_err_phys"] = build_matrix("abs_err_phys")
+
+    return d
+
+
 def filter_results(results, gate_a=None, gate_b=None, patient_range=None):
     """Filter results by success, gate passage, and patient ID range."""
     out = get_successful(results)
@@ -56,9 +118,9 @@ def filter_results(results, gate_a=None, gate_b=None, patient_range=None):
 def plot_true_vs_recovered(data: dict, out_dir: str):
     """Scatter plot: θ_true vs θ_rec for each parameter."""
     params = data["param_names"]
-    results = data["results"]
+    df = data["df"]
     n_params = len(params)
-    n_success = len(get_successful(results))
+    n_success = int(df["success"].sum())
 
     n_cols = 5
     n_rows = (n_params + n_cols - 1) // n_cols
@@ -66,26 +128,20 @@ def plot_true_vs_recovered(data: dict, out_dir: str):
     fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3.5 * n_rows))
     axes = axes.flatten()
 
+    theta_true = df["theta_true"]
+    theta_rec = df["theta_rec"]
+    valid = ~np.isnan(theta_true[:, 0]) & ~np.isnan(theta_rec[:, 0])
+
     for i, pname in enumerate(params):
         ax = axes[i]
-        true_vals = []
-        rec_vals = []
-        for r in results:
-            theta_true = r.get("theta_true")
-            theta_rec = r.get("theta_rec")
-            if theta_true is None or theta_rec is None or i >= len(theta_true) or i >= len(theta_rec):
-                continue
-            tv = theta_true[i]
-            rv = theta_rec[i]
-            if tv is not None and rv is not None:
-                true_vals.append(tv)
-                rec_vals.append(rv)
+        tv = theta_true[valid, i]
+        rv = theta_rec[valid, i]
+        n_pts = len(tv)
 
-        if true_vals:
-            ax.scatter(true_vals, rec_vals, alpha=0.6, s=20, edgecolors="k", linewidths=0.3)
-            # unity line
-            lo = min(min(true_vals), min(rec_vals))
-            hi = max(max(true_vals), max(rec_vals))
+        if n_pts > 0:
+            ax.scatter(tv, rv, alpha=0.6, s=20, edgecolors="k", linewidths=0.3)
+            lo = min(tv.min(), rv.min())
+            hi = max(tv.max(), rv.max())
             margin = (hi - lo) * 0.1 if hi > lo else 0.5
             ax.plot([lo - margin, hi + margin], [lo - margin, hi + margin],
                     "r--", linewidth=0.8, alpha=0.5)
@@ -98,7 +154,6 @@ def plot_true_vs_recovered(data: dict, out_dir: str):
         ax.tick_params(axis="both", labelsize=5)
         ax.set_aspect("equal", adjustable="box")
 
-    # hide unused subplots
     for i in range(n_params, len(axes)):
         axes[i].set_visible(False)
 
@@ -114,26 +169,16 @@ def plot_true_vs_recovered(data: dict, out_dir: str):
 def plot_error_boxplot(data: dict, out_dir: str):
     """Boxplot of |θ_err| per parameter."""
     params = data["param_names"]
-    results = data["results"]
-
-    err_by_param = defaultdict(list)
-    for r in results:
-        abs_err = r.get("abs_err_log")
-        if abs_err is None:
-            continue
-        for i, pname in enumerate(params):
-            if i >= len(abs_err):
-                continue
-            e = abs_err[i]
-            if e is not None:
-                err_by_param[pname].append(e)
+    err_mat = data["df"]["abs_err_log"]
 
     names = []
     values = []
-    for pname in params:
-        if pname in err_by_param and err_by_param[pname]:
+    for i, pname in enumerate(params):
+        col = err_mat[:, i]
+        col = col[~np.isnan(col)]
+        if len(col) > 0:
             names.append(pname)
-            values.append(err_by_param[pname])
+            values.append(col)
 
     if not values:
         logging.warning("  No data for error boxplot")
@@ -158,8 +203,11 @@ def plot_error_boxplot(data: dict, out_dir: str):
 def plot_error_vs_phys_magnitude(data: dict, out_dir: str):
     """Scatter: physical param value vs relative error (multi-panel)."""
     params = data["param_names"]
-    results = data["results"]
+    df = data["df"]
     n_params = len(params)
+    ptp = df["param_true_phys"]
+    aep = df["abs_err_phys"]
+    valid = (ptp[:, 0] > 1e-10) & ~np.isnan(aep[:, 0])
 
     n_cols = 5
     n_rows = (n_params + n_cols - 1) // n_cols
@@ -168,21 +216,13 @@ def plot_error_vs_phys_magnitude(data: dict, out_dir: str):
 
     for i, pname in enumerate(params):
         ax = axes[i]
-        phys_vals = []
-        errs = []
-        for r in results:
-            ptp = r.get("param_true_phys")
-            aep = r.get("abs_err_phys")
-            if ptp is None or aep is None or i >= len(ptp) or i >= len(aep):
-                continue
-            pv = ptp[i]
-            ae = aep[i]
-            if pv is not None and ae is not None and pv > 1e-10:
-                phys_vals.append(pv)
-                errs.append(abs(ae / pv) * 100)  # relative %
-
-        if phys_vals:
-            ax.scatter(phys_vals, errs, alpha=0.6, s=15, edgecolors="k", linewidths=0.3)
+        pv = ptp[valid, i]
+        ae = aep[valid, i]
+        mask = (pv > 1e-10)
+        pv = pv[mask]
+        ae = ae[mask]
+        if len(pv) > 0:
+            ax.scatter(pv, abs(ae / pv) * 100, alpha=0.6, s=15, edgecolors="k", linewidths=0.3)
         ax.set_xlabel(f"True {pname} value", fontsize=6)
         ax.set_ylabel("Rel. error (%)", fontsize=6)
         ax.set_title(pname, fontsize=8)
@@ -201,16 +241,14 @@ def plot_error_vs_phys_magnitude(data: dict, out_dir: str):
 
 
 def plot_gate_summary(data: dict, out_dir: str):
-    """Bar chart of gate pass rates."""
-    results = data["results"]
-    n_total = len(results)
+    """Bar chart of gate pass rates (uses raw/unfiltered data)."""
+    d = data.get("inclusive_df") or data["raw_df"]
+    n_total = len(d["ga_pass"])
 
-    ga_pass = sum(1 for r in results if r.get("gate_a", {}).get("passed", False))
-    gb_pass = sum(1 for r in results if r.get("gate_b", {}).get("passed", False))
-    gc_dominated = []
-    for r in results:
-        gc_dominated.append(r.get("gate_c", {}).get("n_prior_dominated", 0))
-    avg_gc = np.mean(gc_dominated) if gc_dominated else 0
+    ga_pass = int(d["ga_pass"].sum())
+    gb_pass = int(d["gb_pass"].sum())
+    gc_dominated = d["gc_dominated"]
+    avg_gc = float(gc_dominated.mean())
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4))
 
@@ -256,11 +294,10 @@ def plot_gate_summary(data: dict, out_dir: str):
 
 def plot_pca_tsne(data: dict, out_dir: str):
     """PCA and t-SNE of recovered θ matrix, colored by final cost."""
-    params = data["param_names"]
-    results = data["results"]
-
-    theta = [r["theta_rec"] for r in results if r.get("theta_rec") is not None]
-    costs = [r.get("cost", float("nan")) for r in results]
+    df = data["df"]
+    valid = ~np.isnan(df["theta_rec"][:, 0])
+    theta = df["theta_rec"][valid]
+    costs = df["cost"][valid]
     if len(theta) < 3:
         logging.warning("  Too few points for PCA/t-SNE")
         return
@@ -272,11 +309,9 @@ def plot_pca_tsne(data: dict, out_dir: str):
         logging.warning("  sklearn not available, skipping PCA/t-SNE")
         return
 
-    X = np.array(theta)
-    c = np.array(costs)
-    Xc = X - X.mean(axis=0)
+    Xc = theta - theta.mean(axis=0)
 
-    n = max(2, min(5, len(X) - 1))
+    n = max(2, min(5, len(theta) - 1))
     pca = PCA(n_components=2)
     pca_c = pca.fit_transform(Xc)
     pca_var = pca.explained_variance_ratio_
@@ -285,7 +320,7 @@ def plot_pca_tsne(data: dict, out_dir: str):
     tsne_c = tsne.fit_transform(Xc)
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(12, 5))
-    sc1 = ax1.scatter(pca_c[:, 0], pca_c[:, 1], c=c, cmap="viridis",
+    sc1 = ax1.scatter(pca_c[:, 0], pca_c[:, 1], c=costs, cmap="viridis",
                       s=40, edgecolors="k", linewidths=0.3)
     ax1.set_xlabel(f"PC1 ({pca_var[0]*100:.1f}%)")
     ax1.set_ylabel(f"PC2 ({pca_var[1]*100:.1f}%)")
@@ -293,7 +328,7 @@ def plot_pca_tsne(data: dict, out_dir: str):
     ax1.grid(alpha=0.3)
     plt.colorbar(sc1, ax=ax1, label="Final cost")
 
-    sc2 = ax2.scatter(tsne_c[:, 0], tsne_c[:, 1], c=c, cmap="viridis",
+    sc2 = ax2.scatter(tsne_c[:, 0], tsne_c[:, 1], c=costs, cmap="viridis",
                       s=40, edgecolors="k", linewidths=0.3)
     ax2.set_xlabel("t-SNE 1")
     ax2.set_ylabel("t-SNE 2")
@@ -310,11 +345,11 @@ def plot_pca_tsne(data: dict, out_dir: str):
 
 def plot_cost_vs_clusters(data: dict, out_dir: str):
     """Scatter: cost vs n_clusters (gate A), annotated by patient ID."""
-    results = data["results"]
-    costs = [r["cost"] for r in results]
-    n_cl = [r.get("gate_a", {}).get("n_clusters", 0) for r in results]
-    pids = [r.get("patient_id", -1) for r in results]
-    if not costs:
+    df = data["df"]
+    costs = df["cost"]
+    n_cl = df["n_clusters"]
+    pids = df["patient_id"]
+    if len(costs) == 0:
         return
 
     fig, ax = plt.subplots(figsize=(7, 4))
@@ -337,14 +372,13 @@ def plot_cost_vs_clusters(data: dict, out_dir: str):
 def plot_error_correlation_heatmap(data: dict, out_dir: str):
     """Heatmap of Pearson correlation between parameter errors."""
     params = data["param_names"]
-    results = data["results"]
-    errs = [r["abs_err_log"] for r in results]
-    errs = [e for e in errs if e is not None and all(v is not None for v in e)]
-    if len(errs) < 3:
+    err_mat = data["df"]["abs_err_log"]
+    valid = ~np.isnan(err_mat).any(axis=1)
+    err_mat = err_mat[valid]
+    if len(err_mat) < 3:
         logging.warning("  Too few valid error vectors for correlation heatmap")
         return
-    X = np.array(errs)
-    C = np.corrcoef(X.T)
+    C = np.corrcoef(err_mat.T)
     mask = np.triu(np.ones_like(C, dtype=bool), k=1)
 
     fig, ax = plt.subplots(figsize=(7, 6))
@@ -369,17 +403,16 @@ def plot_error_correlation_heatmap(data: dict, out_dir: str):
 
 def plot_pca_with_true(data: dict, out_dir: str):
     """PCA of recovered θ with true θ projected; lines connect each pair."""
-    params = data["param_names"]
-    results = data["results"]
+    df = data["df"]
     try:
         from sklearn.decomposition import PCA
     except ImportError:
         return
 
-    succ = [r for r in results if r.get("theta_rec") is not None and r.get("theta_true") is not None]
-    theta_r = np.array([r["theta_rec"] for r in succ])
-    theta_t = np.array([r["theta_true"] for r in succ])
-    costs = np.array([r.get("cost", float("nan")) for r in succ])
+    valid = ~np.isnan(df["theta_rec"][:, 0]) & ~np.isnan(df["theta_true"][:, 0])
+    theta_r = df["theta_rec"][valid]
+    theta_t = df["theta_true"][valid]
+    costs = df["cost"][valid]
     if len(theta_r) < 3:
         return
 
@@ -419,21 +452,13 @@ def plot_pca_with_true(data: dict, out_dir: str):
 def plot_coefficient_variation(data: dict, out_dir: str):
     """Bar chart of coefficient of variation per parameter."""
     params = data["param_names"]
-    results = data["results"]
-
-    cv_vals = []
-    for i, pname in enumerate(params):
-        ratios = []
-        for r in results:
-            abs_err = r.get("abs_err_log")
-            theta_true = r.get("theta_true")
-            if abs_err is None or theta_true is None or i >= len(abs_err) or i >= len(theta_true):
-                continue
-            ae = abs_err[i]
-            tv = abs(theta_true[i]) if theta_true[i] is not None else 0
-            if ae is not None and tv > 1e-10:
-                ratios.append(ae / tv)
-        cv_vals.append(np.median(ratios) if ratios else 0)
+    df = data["df"]
+    abs_err = df["abs_err_log"]
+    theta_t = df["theta_true"]
+    tv_abs = np.abs(theta_t)
+    valid = ~np.isnan(abs_err) & ~np.isnan(theta_t) & (tv_abs > 1e-10)
+    ratios = np.where(valid, abs_err / tv_abs, np.nan)
+    cv_vals = [np.nanmedian(ratios[:, i]) if np.any(valid[:, i]) else 0 for i in range(len(params))]
 
     fig, ax = plt.subplots(figsize=(8, 4))
     cap = np.percentile(cv_vals, 95) if len(cv_vals) > 1 else max(cv_vals)
@@ -453,31 +478,33 @@ def plot_coefficient_variation(data: dict, out_dir: str):
 
 
 def print_detailed_gate_table(data: dict):
-    """Print per-patient gate summary."""
-    results = data["results"]
+    """Print per-patient gate summary (uses raw/unfiltered data)."""
+    d = data.get("inclusive_df") or data["raw_df"]
     headers = ["PID", "Cost", "nClust", "GateA", "GateB", "nDom", "LjungQ"]
     logging.info(f"{headers[0]:>4} {headers[1]:>10} {headers[2]:>6} {headers[3]:>6} {headers[4]:>6} {headers[5]:>5} {headers[6]:>10}")
     logging.info(f"{'-'*4} {'-'*10} {'-'*6} {'-'*6} {'-'*6} {'-'*5} {'-'*10}")
-    for r in results:
-        pid = r.get("patient_id", -1)
-        cost = r.get("cost", float("nan"))
-        gate_a = r.get("gate_a", {})
-        gate_b = r.get("gate_b", {})
-        gate_c = r.get("gate_c", {})
-        nc = gate_a.get("n_clusters", 0)
-        ga = "PASS" if gate_a.get("passed", False) else "FAIL"
-        gb = "PASS" if gate_b.get("passed", False) else "FAIL"
-        nd = gate_c.get("n_prior_dominated", 0)
-        lq = gate_b.get("lb_q", 0.0)
-        logging.info(f"{pid:>4} {cost:>10.4f} {nc:>6} {ga:>6} {gb:>6} {nd:>5} {lq:>10.1f}")
+    # Gate B lb_q is not in precompute; fallback to raw data
+    raw = data.get("results_inclusive") or data["results_raw"]
+    for i, r in enumerate(raw):
+        pid = d["patient_id"][i]
+        cost = d["cost"][i]
+        nc = d["n_clusters"][i]
+        ga = d["ga_pass"][i]
+        gb = d["gb_pass"][i]
+        nd = d["gc_dominated"][i]
+        lq = r.get("gate_b", {}).get("lb_q", 0.0)
+        logging.info(f"{int(pid):>4} {cost:>10.4f} {nc:>6} {'PASS' if ga else 'FAIL':>6} {'PASS' if gb else 'FAIL':>6} {nd:>5} {lq:>10.1f}")
     logging.info("")
 
 
 def print_summary_table(data: dict):
-    """Print per-parameter recovery stats."""
+    """Print per-parameter recovery stats (uses filtered/analyzed results)."""
     params = data["param_names"]
-    results = data["results"]
-    n_success = len(results)
+    df = data["df"]
+    n_success = len(df["cost"])
+    abs_err = df["abs_err_log"]
+    ptp = df["param_true_phys"]
+    prp = df["param_rec_phys"]
 
     logging.info(f"\n{'=' * 90}")
     logging.info(f"{'Parameter':<12} {'n_rec':>5} {'Mean |err|':>12} {'Median |err|':>14} "
@@ -485,36 +512,30 @@ def print_summary_table(data: dict):
     logging.info(f"{'=' * 90}")
 
     for i, pname in enumerate(params):
-        errs = []
-        phys_true = []
-        phys_rec = []
-        for r in results:
-            e = r["abs_err_log"][i]
-            if e is not None:
-                errs.append(e)
-                pt = r["param_true_phys"][i]
-                pr = r["param_rec_phys"][i]
-                if pt is not None and pr is not None and pt > 1e-10:
-                    phys_true.append(pt)
-                    phys_rec.append(pr)
-
-        if not errs:
+        errs = abs_err[:, i]
+        errs = errs[~np.isnan(errs)]
+        if len(errs) == 0:
             continue
 
         mean_err = np.mean(errs)
         med_err = np.median(errs)
-        p25 = np.percentile(errs, 25)
-        p75 = np.percentile(errs, 75)
+        p25_val = np.percentile(errs, 25)
+        p75_val = np.percentile(errs, 75)
 
         # mean relative error in physical space
-        rel_errs = [abs(pr - pt) / abs(pt) * 100 for pt, pr in zip(phys_true, phys_rec)]
-        mean_rel = np.mean(rel_errs) if rel_errs else float("nan")
+        pt = ptp[:, i]
+        pr = prp[:, i]
+        mask = (pt > 1e-10) & ~np.isnan(pr) & ~np.isnan(pt)
+        if mask.any():
+            mean_rel = float(np.mean(np.abs(pr[mask] - pt[mask]) / np.abs(pt[mask]) * 100))
+        else:
+            mean_rel = float("nan")
 
         logging.info(f"{pname:<12} {len(errs):>5} {mean_err:>12.4f} {med_err:>14.4f} "
-              f"{p25:>8.4f} {p75:>8.4f} {mean_rel:>9.2f}%")
+              f"{p25_val:>8.4f} {p75_val:>8.4f} {mean_rel:>9.2f}%")
 
     logging.info(f"{'=' * 90}")
-    logging.info(f"\nTotal patients: {len(results)} | Successful identifications: {n_success}\n")
+    logging.info(f"\nTotal patients: {len(df['cost'])} | Successful identifications: {n_success}\n")
 
 
 def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
@@ -717,26 +738,26 @@ def plot_cmaes_landscape(data: dict, out_dir: str):
 
 def plot_evals_histogram(data: dict, out_dir: str):
     """Stacked histogram of CMA-ES vs LM evaluations per patient."""
-    results = data["results"]
-    has_lm = results and "cmaes_evals" in results[0]
+    d = data.get("inclusive_df") or data["df"]
+    n = len(d["cmaes_evals"])
+    has_lm = n > 0 and (d["cmaes_evals"] != 0).any()
 
     fig, ax = plt.subplots(figsize=(8, 4))
     if has_lm:
-        cmaes = np.array([r.get("cmaes_evals", 0) for r in results])
-        lm = np.array([r.get("lm_evals", 0) for r in results])
+        cmaes = d["cmaes_evals"]
+        lm = d["lm_evals"]
         total = cmaes + lm
         idx = np.argsort(total)
-        ax.bar(range(len(results)), cmaes[idx], label="CMA-ES evals", color="#2196F3", alpha=0.8)
-        ax.bar(range(len(results)), lm[idx], bottom=cmaes[idx], label="LM evals", color="#FF9800", alpha=0.8)
+        ax.bar(range(n), cmaes[idx], label="CMA-ES evals", color="#2196F3", alpha=0.8)
+        ax.bar(range(n), lm[idx], bottom=cmaes[idx], label="LM evals", color="#FF9800", alpha=0.8)
         ax.set_ylabel("Evaluations")
         ax.legend(fontsize=7)
-        ax.set_title(f"CMA-ES vs LM evaluations per patient (n={len(results)})")
+        ax.set_title(f"CMA-ES vs LM evaluations per patient (n={n})")
     else:
-        evals = [r.get("total_evals", 0) for r in results]
-        ax.hist(evals, bins=30, color="steelblue", alpha=0.8, edgecolor="white")
+        ax.hist(d["total_evals"], bins=30, color="steelblue", alpha=0.8, edgecolor="white")
         ax.set_xlabel("Total evaluations")
         ax.set_ylabel("Patients")
-        ax.set_title(f"Total evaluations histogram (n={len(results)})")
+        ax.set_title(f"Total evaluations histogram (n={n})")
     ax.grid(axis="y", alpha=0.3)
     ax.tick_params(axis="x", labelsize=5)
 
@@ -749,20 +770,10 @@ def plot_evals_histogram(data: dict, out_dir: str):
 
 def plot_cost_improvement(data: dict, out_dir: str):
     """Boxplot of cost improvement after LM refinement."""
-    results = data["results"]
-    has_lm = results and "best_cma_cost" in results[0]
-    if not has_lm:
-        logging.warning("  best_cma_cost not in JSON, skipping cost improvement plot")
-        return
-
-    improvements = []
-    for r in results:
-        bcc = r.get("best_cma_cost")
-        final = r.get("cost")
-        if bcc is not None and final is not None and bcc > 0 and bcc < 1e10:
-            improvements.append((bcc - final) / bcc * 100)
-
-    if not improvements:
+    df = data["df"]
+    improvements = df["cost_improvement_pct"]
+    improvements = improvements[~np.isnan(improvements)]
+    if len(improvements) == 0:
         return
 
     fig, ax = plt.subplots(figsize=(6, 4))
@@ -783,27 +794,16 @@ def plot_cost_improvement(data: dict, out_dir: str):
 
 def plot_evals_vs_accuracy(data: dict, out_dir: str):
     """Scatter: total_evals vs mean abs error, colored by Gate A."""
-    results = data["results"]
-    params = data["param_names"]
-
-    x = []
-    y = []
-    gate_a_pass = []
-    for r in results:
-        ev = r.get("total_evals", 0)
-        err = r.get("abs_err_log")
-        if not err or all(v is None for v in err):
-            continue
-        mean_err = np.mean([v for v in err if v is not None])
-        x.append(ev)
-        y.append(mean_err)
-        gate_a_pass.append(r.get("gate_a", {}).get("passed", False))
+    df = data["df"]
+    err_mat = df["abs_err_log"]
+    valid = ~np.isnan(err_mat).all(axis=1)
+    x = df["total_evals"][valid]
+    y = np.nanmean(err_mat[valid], axis=1)
+    gate_a_pass = df["ga_pass"][valid]
 
     if len(x) < 3:
         return
 
-    x = np.array(x)
-    y = np.array(y)
     colors = ["#4CAF50" if p else "#F44336" for p in gate_a_pass]
 
     fig, ax = plt.subplots(figsize=(7, 5))
@@ -826,40 +826,40 @@ def plot_evals_vs_accuracy(data: dict, out_dir: str):
 def plot_error_by_gate(data: dict, out_dir: str):
     """Grouped bar: mean |err| per parameter split by gate passage."""
     params = data["param_names"]
-    results = data["results"]
+    df = data["df"]
+    err_mat = df["abs_err_log"]
+    n_params = len(params)
 
-    def mean_err_for_group(group):
-        if not group:
-            return [float("nan")] * len(params)
-        errs = []
-        for r in group:
-            ae = r.get("abs_err_log")
-            if ae and len(ae) >= len(params):
-                errs.append([ae[i] if ae[i] is not None else float("nan") for i in range(len(params))])
-        return np.nanmean(errs, axis=0) if errs else [float("nan")] * len(params)
+    def nanmean_or_nan(arr):
+        if len(arr) == 0:
+            return np.full(n_params, float("nan"))
+        return np.nanmean(arr, axis=0)
 
-    # Split by Gate A
-    ga_pass = [r for r in results if r.get("gate_a", {}).get("passed", False)]
-    ga_fail = [r for r in results if not r.get("gate_a", {}).get("passed", False)]
-    # Split by Gate B
-    gb_pass = [r for r in results if r.get("gate_b", {}).get("passed", False)]
-    gb_fail = [r for r in results if not r.get("gate_b", {}).get("passed", False)]
-    # Split by Gate C (n_prior_dominated)
-    gc_low  = [r for r in results if r.get("gate_c", {}).get("n_prior_dominated", 0) <= 2]
-    gc_med  = [r for r in results if 3 <= r.get("gate_c", {}).get("n_prior_dominated", 0) <= 5]
-    gc_high = [r for r in results if r.get("gate_c", {}).get("n_prior_dominated", 0) >= 6]
+    ga = df["ga_pass"]
+    gb = df["gb_pass"]
+    gc = df["gc_dominated"]
 
-    x = np.arange(len(params))
+    e_ga_p = nanmean_or_nan(err_mat[ga])
+    e_ga_f = nanmean_or_nan(err_mat[~ga])
+    e_gb_p = nanmean_or_nan(err_mat[gb])
+    e_gb_f = nanmean_or_nan(err_mat[~gb])
+
+    low  = gc <= 2
+    med  = (gc >= 3) & (gc <= 5)
+    high = gc >= 6
+
+    e_gc_l = nanmean_or_nan(err_mat[low])
+    e_gc_m = nanmean_or_nan(err_mat[med])
+    e_gc_h = nanmean_or_nan(err_mat[high])
+
+    x = np.arange(n_params)
     width = 0.22
 
     fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 4.5))
 
-    # Gate A
-    e1 = mean_err_for_group(ga_pass)
-    e2 = mean_err_for_group(ga_fail)
-    ax1.bar(x - width/2, e1, width, label=f"PASS (n={len(ga_pass)})", color="#4CAF50", alpha=0.8)
-    if len(ga_fail) > 0:
-        ax1.bar(x + width/2, e2, width, label=f"FAIL (n={len(ga_fail)})", color="#F44336", alpha=0.8)
+    ax1.bar(x - width/2, e_ga_p, width, label=f"PASS (n={ga.sum()})", color="#4CAF50", alpha=0.8)
+    if (~ga).sum() > 0:
+        ax1.bar(x + width/2, e_ga_f, width, label=f"FAIL (n={(~ga).sum()})", color="#F44336", alpha=0.8)
     ax1.set_xticks(x)
     ax1.set_xticklabels(params, rotation=45, fontsize=7)
     ax1.set_ylabel("Mean |θ_err|")
@@ -867,12 +867,9 @@ def plot_error_by_gate(data: dict, out_dir: str):
     ax1.legend(fontsize=6)
     ax1.grid(axis="y", alpha=0.3)
 
-    # Gate B
-    e1 = mean_err_for_group(gb_pass)
-    e2 = mean_err_for_group(gb_fail)
-    ax2.bar(x - width/2, e1, width, label=f"PASS (n={len(gb_pass)})", color="#4CAF50", alpha=0.8)
-    if len(gb_fail) > 0:
-        ax2.bar(x + width/2, e2, width, label=f"FAIL (n={len(gb_fail)})", color="#F44336", alpha=0.8)
+    ax2.bar(x - width/2, e_gb_p, width, label=f"PASS (n={gb.sum()})", color="#4CAF50", alpha=0.8)
+    if (~gb).sum() > 0:
+        ax2.bar(x + width/2, e_gb_f, width, label=f"FAIL (n={(~gb).sum()})", color="#F44336", alpha=0.8)
     ax2.set_xticks(x)
     ax2.set_xticklabels(params, rotation=45, fontsize=7)
     ax2.set_ylabel("Mean |θ_err|")
@@ -880,13 +877,9 @@ def plot_error_by_gate(data: dict, out_dir: str):
     ax2.legend(fontsize=6)
     ax2.grid(axis="y", alpha=0.3)
 
-    # Gate C
-    e_lo = mean_err_for_group(gc_low)
-    e_me = mean_err_for_group(gc_med)
-    e_hi = mean_err_for_group(gc_high)
-    ax3.bar(x - width, e_lo, width, label=f"0-2 dom (n={len(gc_low)})", color="#4CAF50", alpha=0.8)
-    ax3.bar(x,      e_me, width, label=f"3-5 dom (n={len(gc_med)})", color="#FF9800", alpha=0.8)
-    ax3.bar(x + width, e_hi, width, label=f"6+ dom (n={len(gc_high)})", color="#F44336", alpha=0.8)
+    ax3.bar(x - width, e_gc_l, width, label=f"0-2 dom (n={low.sum()})", color="#4CAF50", alpha=0.8)
+    ax3.bar(x,        e_gc_m, width, label=f"3-5 dom (n={med.sum()})", color="#FF9800", alpha=0.8)
+    ax3.bar(x + width, e_gc_h, width, label=f"6+ dom (n={high.sum()})", color="#F44336", alpha=0.8)
     ax3.set_xticks(x)
     ax3.set_xticklabels(params, rotation=45, fontsize=7)
     ax3.set_ylabel("Mean |θ_err|")
@@ -940,6 +933,8 @@ def main():
                         help="Minimum patient ID (inclusive)")
     parser.add_argument("--patient-end", type=int, default=None,
                         help="Maximum patient ID (inclusive)")
+    parser.add_argument("--include-failures", action="store_true",
+                        help="Include failed identifications in gate_summary and evals_histogram")
     parser.add_argument("--verbose", action="store_true",
                         help="Enable debug-level logging")
     args = parser.parse_args()
@@ -955,18 +950,42 @@ def main():
     data = load_results(args.json)
     os.makedirs(args.out, exist_ok=True)
 
+    # Preserve original unfiltered list for gate summary etc.
+    data["results_raw"] = data["results"]
+
     # Apply filters
     patient_range = None
     if args.patient_start is not None or args.patient_end is not None:
         patient_range = (args.patient_start or 0, args.patient_end or 999999)
+
+    # Recovery analysis: success + gate/range filters
     filtered = filter_results(data["results"], gate_a=args.gate_a,
                               gate_b=args.gate_b, patient_range=patient_range)
     if patient_range:
         logging.info(f"Patient range: {patient_range}")
     if args.gate_a or args.gate_b:
-        logging.info(f"Filtered: {len(get_successful(data['results']))} successful "
+        logging.info(f"Filtered: {len(get_successful(data['results_raw']))} successful "
                      f"-> {len(filtered)} after gate/range filters")
     data["results"] = filtered
+
+    n_params = len(data["param_names"])
+    # Precompute: raw (unfiltered), filtered (for recovery plots), inclusive (if applicable)
+    data["raw_df"] = precompute(data["results_raw"], n_params)
+    data["df"] = precompute(filtered, n_params)
+
+    # Inclusive set: all patients passing gate/range (including failures)
+    if args.include_failures:
+        inclu = [r for r in data["results_raw"] if r.get("success", False) or True]
+        if args.gate_a:
+            inclu = [r for r in inclu if r.get("gate_a", {}).get("passed", False)]
+        if args.gate_b:
+            inclu = [r for r in inclu if r.get("gate_b", {}).get("passed", False)]
+        if patient_range:
+            lo, hi = patient_range
+            inclu = [r for r in inclu if lo <= r.get("patient_id", -1) <= hi]
+        data["results_inclusive"] = inclu
+        data["inclusive_df"] = precompute(inclu, n_params)
+        logging.info(f"Inclusive (incl. failures): {len(inclu)} patients")
 
     if not args.no_plots:
         if args.plot:

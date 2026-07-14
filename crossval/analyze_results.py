@@ -76,8 +76,8 @@ def plot_true_vs_recovered(data: dict, out_dir: str):
             ax.set_ylim(lo - margin, hi + margin)
 
         ax.set_title(pname, fontsize=8)
-        ax.set_xlabel("θ true", fontsize=6)
-        ax.set_ylabel("θ recovered", fontsize=6)
+        ax.set_xlabel("log-parameter value (true)", fontsize=6)
+        ax.set_ylabel("log-parameter value (recovered)", fontsize=6)
         ax.tick_params(axis="both", labelsize=5)
         ax.set_aspect("equal", adjustable="box")
 
@@ -128,6 +128,7 @@ def plot_error_boxplot(data: dict, out_dir: str):
     bp = ax.boxplot(values, showmeans=True, meanprops={
         "marker": "o", "markerfacecolor": "red", "markersize": 3})
     ax.set_xticklabels(names, rotation=45, fontsize=6)
+    ax.set_yscale("symlog")
 
     ax.set_ylabel("|θ_err| (log-space)")
     ax.set_title("Parameter Recovery Error by Parameter")
@@ -140,11 +141,18 @@ def plot_error_boxplot(data: dict, out_dir: str):
 
 
 def plot_error_vs_phys_magnitude(data: dict, out_dir: str):
-    """Scatter: physical param value vs relative error."""
+    """Scatter: physical param value vs relative error (multi-panel)."""
     params = data["param_names"]
     results = data["results"]
+    n_params = len(params)
+
+    n_cols = 5
+    n_rows = (n_params + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(4 * n_cols, 3.5 * n_rows))
+    axes = axes.flatten()
 
     for i, pname in enumerate(params):
+        ax = axes[i]
         phys_vals = []
         errs = []
         for r in results:
@@ -160,19 +168,23 @@ def plot_error_vs_phys_magnitude(data: dict, out_dir: str):
                 phys_vals.append(pv)
                 errs.append(abs(ae / pv) * 100)  # relative %
 
-        if len(phys_vals) < 3:
-            continue
-
-        fig, ax = plt.subplots(figsize=(5, 4))
-        ax.scatter(phys_vals, errs, alpha=0.6, s=15, edgecolors="k", linewidths=0.3)
-        ax.set_xlabel(f"True {pname} value")
-        ax.set_ylabel("Relative error (%)")
-        ax.set_title(f"{pname}: relative error vs true value")
+        if phys_vals:
+            ax.scatter(phys_vals, errs, alpha=0.6, s=15, edgecolors="k", linewidths=0.3)
+        ax.set_xlabel(f"True {pname} value", fontsize=6)
+        ax.set_ylabel("Rel. error (%)", fontsize=6)
+        ax.set_title(pname, fontsize=8)
+        ax.tick_params(axis="both", labelsize=5)
         ax.grid(alpha=0.3)
 
-        out_path = os.path.join(out_dir, f"relerr_vs_phys_{pname}.png")
-        fig.savefig(out_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
+    for i in range(n_params, len(axes)):
+        axes[i].set_visible(False)
+
+    fig.suptitle("Relative error vs true physical parameter value", fontsize=10, y=1.01)
+    plt.tight_layout()
+    out_path = os.path.join(out_dir, "relerr_vs_phys.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
 
 
 def plot_gate_summary(data: dict, out_dir: str):
@@ -422,7 +434,7 @@ def print_detailed_gate_table(data: dict):
     results = data["results"]
     headers = ["PID", "Cost", "nClust", "GateA", "GateB", "nDom", "LjungQ"]
     print(f"{headers[0]:>4} {headers[1]:>10} {headers[2]:>6} {headers[3]:>6} {headers[4]:>6} {headers[5]:>5} {headers[6]:>10}")
-    print(f"{'─'*4} {'─'*10} {'─'*6} {'─'*6} {'─'*6} {'─'*5} {'─'*10}")
+    print(f"{'-'*4} {'-'*10} {'-'*6} {'-'*6} {'-'*6} {'-'*5} {'-'*10}")
     for r in results:
         pid = r.get("patient_id", -1)
         cost = r.get("cost", float("nan"))
@@ -445,7 +457,7 @@ def print_summary_table(data: dict):
     n_success = sum(1 for r in results if r.get("success", False))
 
     print(f"\n{'=' * 90}")
-    print(f"{'Parameter':<12} {'n_rec':>5} {'Mean |θ_err|':>12} {'Median |θ_err|':>14} "
+    print(f"{'Parameter':<12} {'n_rec':>5} {'Mean |err|':>12} {'Median |err|':>14} "
           f"{'P25':>8} {'P75':>8} {'Mean rel%':>10}")
     print(f"{'=' * 90}")
 
@@ -485,7 +497,12 @@ def print_summary_table(data: dict):
 
 
 def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
-    """CGM observed vs predicted + residuals for patients with lowest cost."""
+    """CGM observed vs predicted + residuals + ACF for patients with lowest cost."""
+    try:
+        from statsmodels.graphics.tsaplots import plot_acf
+    except ImportError:
+        plot_acf = None
+
     results = [r for r in data["results"] if r["success"] and "cgm_residuals" in r]
     if not results:
         return
@@ -495,51 +512,69 @@ def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
     for idx in range(n_plot):
         r = results[idx]
         n_obs = len(r["cgm_residuals"])
+        time_hr = np.arange(n_obs) * 5 / 60
 
-        fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(14, 6), sharex=True)
+        cgm_obs = r.get("cgm_observed")
+        cgm_pred = None
+        if cgm_obs is not None:
+            cgm_pred = np.array(cgm_obs) - np.array(r["cgm_residuals"])
 
-        # Reconstruct predicted from residuals
-        cgm_obs = r.get("cgm_observed", None)
-        if cgm_obs is None and "theta_true" in r:
-            cgm_obs = [0] * n_obs  # placeholder
+        fig = plt.figure(figsize=(14, 8))
+        gs = fig.add_gridspec(3, 1, height_ratios=[1.2, 1, 0.8], hspace=0.25)
+        ax0 = fig.add_subplot(gs[0])
+        ax1 = fig.add_subplot(gs[1], sharex=ax0)
+        ax2 = fig.add_subplot(gs[2], sharex=ax0)
 
-        res_min = min(r["cgm_residuals"])
-        res_max = max(r["cgm_residuals"])
+        # --- Top: observed vs predicted ---
+        if cgm_obs is not None and cgm_pred is not None:
+            ax0.plot(time_hr, cgm_obs, color="black", linewidth=0.6, label="Observed (CGM)")
+            ax0.plot(time_hr, cgm_pred, color="orange", linewidth=0.6, label="Predicted (model)")
+            ax0.set_ylabel("Glucose [mg/dL]")
+            ax0.legend(fontsize=7, loc="upper right")
+            ax0.set_title(f"Patient {r['patient_id']}: CGM fit (cost={r['cost']:.4f})")
+        else:
+            ax0.text(0.5, 0.5, "CGM observed data not available",
+                     transform=ax0.transAxes, ha="center", va="center")
+            ax0.set_title(f"Patient {r['patient_id']}")
+        ax0.grid(alpha=0.3)
+
+        # --- Middle: residuals ---
+        res_arr = np.array(r["cgm_residuals"])
+        res_min = res_arr.min()
+        res_max = res_arr.max()
         bound = max(abs(res_min), abs(res_max)) * 1.2
 
-        time_hr = [i * 5 / 60 for i in range(n_obs)]
-
         ax1.axhline(0, color="gray", linewidth=0.3)
-        ax1.fill_between(time_hr, 0, r["cgm_residuals"],
-                         where=np.array(r["cgm_residuals"]) >= 0,
+        ax1.fill_between(time_hr, 0, res_arr,
+                         where=res_arr >= 0,
                          color="red", alpha=0.3, label="Overestimate")
-        ax1.fill_between(time_hr, 0, r["cgm_residuals"],
-                         where=np.array(r["cgm_residuals"]) < 0,
+        ax1.fill_between(time_hr, 0, res_arr,
+                         where=res_arr < 0,
                          color="blue", alpha=0.3, label="Underestimate")
-        ax1.plot(time_hr, r["cgm_residuals"], color="black", linewidth=0.5)
-        ax1.set_ylabel("Residual (observed − predicted) [mg/dL]")
+        ax1.plot(time_hr, res_arr, color="black", linewidth=0.5)
+        ax1.set_ylabel("Residual [mg/dL]")
         ax1.set_ylim(-bound, bound)
-        ax1.set_title(f"Patient {r['patient_id']}: CGM residuals (cost={r['cost']:.4f})")
         ax1.legend(fontsize=7)
         ax1.grid(alpha=0.3)
 
-        # ACF
-        from scipy import signal
-        n_lags = min(40, n_obs // 5)
-        acf = [1.0]
-        res = np.array(r["cgm_residuals"])
-        res -= res.mean()
-        var = res.var()
-        if var > 1e-12:
-            for lag in range(1, n_lags + 1):
-                acf.append(np.corrcoef(res[:-lag], res[lag:])[0, 1] if len(res) > lag else 0)
-        lags = range(len(acf))
-        ax2.bar(lags, acf, width=0.6, color="steelblue", alpha=0.8)
-        ax2.axhline(1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5, alpha=0.6)
-        ax2.axhline(-1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5, alpha=0.6)
-        ax2.set_xlabel("Lag")
+        # --- Bottom: ACF ---
+        if plot_acf is not None:
+            plot_acf(res_arr, ax=ax2, lags=min(40, n_obs // 5), alpha=0.05,
+                     zero=False, linewidth=0.8)
+            ax2.set_title("")
+        else:
+            n_lags = min(40, n_obs // 5)
+            res_c = res_arr - res_arr.mean()
+            var = res_c.var()
+            acf = [1.0]
+            if var > 1e-12:
+                for lag in range(1, n_lags + 1):
+                    acf.append(np.corrcoef(res_c[:-lag], res_c[lag:])[0, 1] if len(res_c) > lag else 0)
+            ax2.bar(range(len(acf)), acf, width=0.6, color="steelblue", alpha=0.8)
+            ax2.axhline(1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5, alpha=0.6)
+            ax2.axhline(-1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5, alpha=0.6)
+        ax2.set_xlabel("Time [hours]")
         ax2.set_ylabel("Autocorrelation")
-        ax2.set_title("Residual ACF")
         ax2.grid(alpha=0.3)
 
         plt.tight_layout()
@@ -551,6 +586,11 @@ def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
 
 def plot_residual_acf(data: dict, out_dir: str):
     """Small-multiples ACF plots for all patients."""
+    try:
+        from statsmodels.graphics.tsaplots import plot_acf
+    except ImportError:
+        plot_acf = None
+
     results = [r for r in data["results"] if r["success"] and "cgm_residuals" in r]
     if not results:
         return
@@ -565,17 +605,21 @@ def plot_residual_acf(data: dict, out_dir: str):
         ax = axes[i]
         res = np.array(r["cgm_residuals"])
         n_obs = len(res)
-        n_lags = min(40, n_obs // 5)
-        res_c = res - res.mean()
-        var = res_c.var()
-        acf = [1.0]
-        if var > 1e-12:
-            for lag in range(1, n_lags + 1):
-                acf.append(np.corrcoef(res_c[:-lag], res_c[lag:])[0, 1] if len(res_c) > lag else 0)
-        lags = range(len(acf))
-        ax.bar(lags, acf, width=0.6, color="steelblue", alpha=0.7)
-        ax.axhline(1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5)
-        ax.axhline(-1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5)
+        if plot_acf is not None:
+            plot_acf(res, ax=ax, lags=min(40, n_obs // 5), alpha=0.05,
+                     zero=False, linewidth=0.8, color="steelblue")
+            ax.set_title("")
+        else:
+            n_lags = min(40, n_obs // 5)
+            res_c = res - res.mean()
+            var = res_c.var()
+            acf = [1.0]
+            if var > 1e-12:
+                for lag in range(1, n_lags + 1):
+                    acf.append(np.corrcoef(res_c[:-lag], res_c[lag:])[0, 1] if len(res_c) > lag else 0)
+            ax.bar(range(len(acf)), acf, width=0.6, color="steelblue", alpha=0.7)
+            ax.axhline(1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5)
+            ax.axhline(-1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5)
         ax.set_title(f"P{r['patient_id']} (cost={r['cost']:.2f})", fontsize=7)
         ax.tick_params(axis="both", labelsize=5)
 
@@ -591,8 +635,8 @@ def plot_residual_acf(data: dict, out_dir: str):
 
 
 def plot_cmaes_landscape(data: dict, out_dir: str):
-    """PCA of CMA-ES restart points, colored by DBSCAN cluster."""
-    results = [r for r in data["results"] if r.get("success", False) and "restarts" in r]
+    """Small-multiples: PCA of CMA-ES restart points, colored by DBSCAN cluster."""
+    results = [r for r in data["results"] if r.get("success", False) and "restarts" in r and len(r["restarts"]) >= 3]
     if not results:
         return
 
@@ -601,10 +645,15 @@ def plot_cmaes_landscape(data: dict, out_dir: str):
     except ImportError:
         return
 
-    for r in results:
-        restarts = r.get("restarts", [])
-        if len(restarts) < 3:
-            continue
+    n = len(results)
+    n_cols = 5
+    n_rows = (n + n_cols - 1) // n_cols
+    fig, axes = plt.subplots(n_rows, n_cols, figsize=(3 * n_cols, 2.5 * n_rows))
+    axes = axes.flatten()
+
+    for i, r in enumerate(results):
+        ax = axes[i]
+        restarts = r["restarts"]
         X = np.array([rr["params"] for rr in restarts])
         costs = np.array([rr.get("cost", 0) for rr in restarts])
         gate_a = r.get("gate_a", {})
@@ -615,7 +664,6 @@ def plot_cmaes_landscape(data: dict, out_dir: str):
         coords = pca.fit_transform(Xc)
         var_exp = pca.explained_variance_ratio_
 
-        fig, ax = plt.subplots(figsize=(6, 5))
         n_clusters = gate_a.get("n_clusters", 0)
         cmap = plt.cm.tab10
         for pi in range(len(restarts)):
@@ -627,19 +675,22 @@ def plot_cmaes_landscape(data: dict, out_dir: str):
                        c=[color], marker=marker, s=size,
                        edgecolors="k", linewidths=0.3,
                        alpha=0.8, zorder=3)
-            ax.annotate(f"{costs[pi]:.1f}", (coords[pi, 0], coords[pi, 1]),
-                        fontsize=5, alpha=0.7, xytext=(3, 3),
-                        textcoords="offset points")
 
-        ax.set_xlabel(f"PC1 ({var_exp[0]*100:.1f}%)")
-        ax.set_ylabel(f"PC2 ({var_exp[1]*100:.1f}%)")
-        ax.set_title(f"P{r['patient_id']}: {n_clusters} cluster(s), cost={r['cost']:.2f}")
+        ax.set_xlabel(f"PC1 ({var_exp[0]*100:.1f}%)", fontsize=5)
+        ax.set_ylabel(f"PC2 ({var_exp[1]*100:.1f}%)", fontsize=5)
+        ax.tick_params(axis="both", labelsize=5)
+        ax.set_title(f"P{r['patient_id']}: {n_clusters}cl, cost={r['cost']:.2f}", fontsize=7)
         ax.grid(alpha=0.3)
 
-        out_path = os.path.join(out_dir, f"cmaes_landscape_p{r['patient_id']}.png")
-        fig.savefig(out_path, dpi=150, bbox_inches="tight")
-        plt.close(fig)
-        print(f"  Saved {out_path}")
+    for j in range(n, len(axes)):
+        axes[j].set_visible(False)
+
+    fig.suptitle("CMA-ES landscape (PCA of restart points, colored by cluster)", fontsize=10)
+    plt.tight_layout()
+    out_path = os.path.join(out_dir, "cmaes_landscape_all.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    print(f"  Saved {out_path}")
 
 
 def main():

@@ -514,10 +514,11 @@ def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
         n_obs = len(r["cgm_residuals"])
         time_hr = np.arange(n_obs) * 5 / 60
 
-        cgm_obs = r.get("cgm_observed")
+        cgm_raw = r.get("input", {}).get("cgm_value") or r.get("true_input", {}).get("cgm_value")
         cgm_pred = None
-        if cgm_obs is not None:
-            cgm_pred = np.array(cgm_obs) - np.array(r["cgm_residuals"])
+        if cgm_raw is not None:
+            cgm_obs = np.array(cgm_raw)
+            cgm_pred = cgm_obs - np.array(r["cgm_residuals"])
 
         fig = plt.figure(figsize=(14, 8))
         gs = fig.add_gridspec(3, 1, height_ratios=[1.2, 1, 0.8], hspace=0.25)
@@ -526,14 +527,14 @@ def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
         ax2 = fig.add_subplot(gs[2], sharex=ax0)
 
         # --- Top: observed vs predicted ---
-        if cgm_obs is not None and cgm_pred is not None:
+        if cgm_pred is not None:
             ax0.plot(time_hr, cgm_obs, color="black", linewidth=0.6, label="Observed (CGM)")
             ax0.plot(time_hr, cgm_pred, color="orange", linewidth=0.6, label="Predicted (model)")
             ax0.set_ylabel("Glucose [mg/dL]")
             ax0.legend(fontsize=7, loc="upper right")
             ax0.set_title(f"Patient {r['patient_id']}: CGM fit (cost={r['cost']:.4f})")
         else:
-            ax0.text(0.5, 0.5, "CGM observed data not available",
+            ax0.text(0.5, 0.5, "CGM data not available",
                      transform=ax0.transAxes, ha="center", va="center")
             ax0.set_title(f"Patient {r['patient_id']}")
         ax0.grid(alpha=0.3)

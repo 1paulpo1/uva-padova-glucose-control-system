@@ -109,12 +109,12 @@ def plot_error_boxplot(data: dict, out_dir: str):
         return
 
     fig, ax = plt.subplots(figsize=(14, 5))
-    bp = ax.boxplot(values, labels=names, showmeans=True, meanprops={
+    bp = ax.boxplot(values, showmeans=True, meanprops={
         "marker": "o", "markerfacecolor": "red", "markersize": 3})
+    ax.set_xticklabels(names, rotation=45, fontsize=6)
 
     ax.set_ylabel("|θ_err| (log-space)")
     ax.set_title("Parameter Recovery Error by Parameter")
-    ax.tick_params(axis="x", rotation=45, labelsize=6)
     ax.grid(axis="y", alpha=0.3)
 
     out_path = os.path.join(out_dir, "error_boxplot.png")
@@ -492,7 +492,10 @@ def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
         ax1.grid(alpha=0.3)
 
         # ACF
-        from scipy import signal
+        try:
+            from scipy import signal
+        except ImportError:
+            signal = None
         n_lags = min(40, n_obs // 5)
         acf = [1.0]
         res = np.array(r["cgm_residuals"])

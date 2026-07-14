@@ -109,12 +109,12 @@ def plot_error_boxplot(data: dict, out_dir: str):
         return
 
     fig, ax = plt.subplots(figsize=(14, 5))
-    bp = ax.boxplot(values, labels=names, showmeans=True, meanprops={
+    bp = ax.boxplot(values, showmeans=True, meanprops={
         "marker": "o", "markerfacecolor": "red", "markersize": 3})
+    ax.set_xticklabels(names, rotation=45, fontsize=6)
 
     ax.set_ylabel("|θ_err| (log-space)")
     ax.set_title("Parameter Recovery Error by Parameter")
-    ax.tick_params(axis="x", rotation=45, labelsize=6)
     ax.grid(axis="y", alpha=0.3)
 
     out_path = os.path.join(out_dir, "error_boxplot.png")
@@ -582,7 +582,7 @@ def plot_cmaes_landscape(data: dict, out_dir: str):
         coords = pca.fit_transform(Xc)
         var_exp = pca.explained_variance_ratio_
 
-        _, ax = plt.subplots(figsize=(6, 5))
+        fig, ax = plt.subplots(figsize=(6, 5))
         n_clusters = r["gate_a"]["n_clusters"]
         cmap = plt.cm.tab10
         for pi in range(len(restarts)):

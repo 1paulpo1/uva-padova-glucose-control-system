@@ -30,6 +30,19 @@ struct MealErrorConfig {
 };
 
 // ---------------------------------------------------------------------------
+// Generative meal configuration (replaces static daily_meals when enabled)
+// ---------------------------------------------------------------------------
+struct MealGenerationConfig {
+  double daily_cho_g{210.0};    // total CHO per day [g]
+  int n_meals_per_day{3};       // number of meals per day
+  double split_cv{0.3};         // LogNormal CV for CHO split across meals
+  double time_cv{0.12};         // LogNormal CV for meal time jitter (0 = fixed)
+  std::vector<double> meal_times; // base time of each meal [min]; empty = auto-spaced
+  double bolus_u_per_g{0.1};    // insulin units per gram CHO
+  bool enabled{false};
+};
+
+// ---------------------------------------------------------------------------
 // Configuration for the cross-validation experiment
 // ---------------------------------------------------------------------------
 struct VirtualPatientConfig {
@@ -43,6 +56,7 @@ struct VirtualPatientConfig {
 
   CGMNoiseConfig cgm_noise;
   MealErrorConfig meal_errors;
+  MealGenerationConfig meal_generation;
 
   double body_weight_kg{75.0};   // default body weight [kg], used for bolus_u→pmol/kg
 

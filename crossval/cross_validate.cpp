@@ -369,6 +369,23 @@ static void load_json_config(VirtualPatientConfig& cfg, const std::string& path)
       cfg.daily_meals.push_back(meal);
     }
   }
+
+  // Generative meal config
+  if (auto it = j.find("meal_generation"); it != j.end()) {
+    MealGenerationConfig mg;
+    mg.enabled = true;
+    if (auto v = it->find("daily_cho_g"); v != it->end()) mg.daily_cho_g = v->get<double>();
+    if (auto v = it->find("n_meals_per_day"); v != it->end()) mg.n_meals_per_day = v->get<int>();
+    if (auto v = it->find("split_cv"); v != it->end()) mg.split_cv = v->get<double>();
+    if (auto v = it->find("time_cv"); v != it->end()) mg.time_cv = v->get<double>();
+    if (auto v = it->find("bolus_u_per_g"); v != it->end()) mg.bolus_u_per_g = v->get<double>();
+    if (auto mt = it->find("meal_times"); mt != it->end() && mt->is_array()) {
+      mg.meal_times.clear();
+      for (const auto& t : *mt)
+        mg.meal_times.push_back(t.get<double>());
+    }
+    cfg.meal_generation = mg;
+  }
 }
 
 // ===========================================================================

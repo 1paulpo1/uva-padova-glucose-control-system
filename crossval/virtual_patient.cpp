@@ -82,14 +82,74 @@ VirtualPatientResult generate_virtual_patient(
   std::vector<BolusEvent> true_boluses;
 
   int n_days = config.duration_min / 1440 + 1;
-  for (int day = 0; day < n_days; ++day) {
-    int day_offset = day * 1440;
-    for (const auto& dm : config.daily_meals) {
-      int t = day_offset + dm.time_min;
-      if (t > config.duration_min) break;
-      true_meals.push_back({t, dm.cho_mg});
-      if (dm.bolus_dose_pmol_kg > 0.0) {
-        true_boluses.push_back({t, dm.bolus_dose_pmol_kg});
+
+  if (config.meal_generation.enabled) {
+    // ---- Generative meal schedule: different every day ----
+    const auto& mg = config.meal_generation;
+
+    // Base meal times: from config or auto-spaced 360..1260
+    std::vector<double> base_times = mg.meal_times;
+    if (base_times.empty() && mg.n_meals_per_day > 0) {
+      if (mg.n_meals_per_day == 1) {
+        base_times.push_back(720.0);
+      } else {
+        for (int i = 0; i < mg.n_meals_per_day; ++i)
+          base_times.push_back(360.0 + i * 900.0 / (mg.n_meals_per_day - 1));
+      }
+    }
+
+    for (int day = 0; day < n_days; ++day) {
+      int day_offset = day * 1440;
+
+      // Per-day RNG (disjoint from theta: *10000, from syn_data: day*7)
+      std::mt19937 day_rng(config.seed + patient_id * 10000 + day * 7);
+      std::lognormal_distribution<double> ln_cho(0.0, mg.split_cv);
+      std::lognormal_distribution<double> ln_time(0.0, mg.time_cv);
+
+      int n = mg.n_meals_per_day;
+
+      // Raw CHO fractions
+      std::vector<double> raw(n);
+      double sum = 0.0;
+      for (int i = 0; i < n; ++i) {
+        raw[i] = ln_cho(day_rng);
+        sum += raw[i];
+      }
+
+      for (int i = 0; i < n; ++i) {
+        double fraction = raw[i] / sum;
+        double cho_mg = mg.daily_cho_g * fraction * 1000.0;
+
+        // Time with LogNormal jitter
+        double t_raw = base_times[i] * ln_time(day_rng);
+        t_raw = std::clamp(t_raw, 30.0, 1410.0);
+        int t_min = day_offset + static_cast<int>(std::round(t_raw));
+        if (t_min > config.duration_min) break;
+
+        // Ensure ≥30 min gap from previous meal
+        if (!true_meals.empty() && t_min <= true_meals.back().t_min + 30)
+          t_min = true_meals.back().t_min + 30;
+
+        // Bolus dose
+        double bolus_pmol_kg = (cho_mg / 1000.0) * mg.bolus_u_per_g
+                             * constants::kInsulinUnits_To_Pmol / config.body_weight_kg;
+
+        true_meals.push_back({t_min, cho_mg});
+        if (bolus_pmol_kg > 0.0)
+          true_boluses.push_back({t_min, bolus_pmol_kg});
+      }
+    }
+  } else {
+    // ---- Static daily_meals template (original behavior) ----
+    for (int day = 0; day < n_days; ++day) {
+      int day_offset = day * 1440;
+      for (const auto& dm : config.daily_meals) {
+        int t = day_offset + dm.time_min;
+        if (t > config.duration_min) break;
+        true_meals.push_back({t, dm.cho_mg});
+        if (dm.bolus_dose_pmol_kg > 0.0) {
+          true_boluses.push_back({t, dm.bolus_dose_pmol_kg});
+        }
       }
     }
   }

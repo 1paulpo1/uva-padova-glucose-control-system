@@ -228,12 +228,24 @@ def plot_gate_summary(data: dict, out_dir: str):
     ax1.set_title("Gate Pass Rates")
 
     # Histogram of Gate C dominated params
-    ax2.hist(gc_dominated, bins=range(0, max(gc_dominated) + 2),
-             align="left", color="#FF9800", alpha=0.8, edgecolor="white")
+    xmax = min(max(gc_dominated) + 1, int(np.percentile(gc_dominated, 95)) + 2)
+    bins = range(0, max(gc_dominated) + 2)
+    n, _, patches = ax2.hist(gc_dominated, bins=bins,
+                              align="left", color="#FF9800", alpha=0.8, edgecolor="white")
+    ax2.set_xlim(-0.5, xmax - 0.5)
     ax2.set_xlabel("Number of prior-dominated params")
     ax2.set_ylabel("Patients")
     ax2.set_title(f"Gate C: prior-dominated params (avg {avg_gc:.1f})")
     ax2.grid(axis="y", alpha=0.3)
+
+    # Cumulative fraction
+    ax3 = ax2.twinx()
+    cumsum = np.cumsum(n) / sum(n) * 100
+    ax3.plot(range(len(cumsum)), cumsum, color="navy", marker="o", markersize=3,
+             linewidth=0.8, label="Cumulative %")
+    ax3.set_ylabel("Cumulative %", color="navy")
+    ax3.tick_params(axis="y", colors="navy")
+    ax3.set_ylim(0, 105)
 
     plt.tight_layout()
     out_path = os.path.join(out_dir, "gate_summary.png")
@@ -424,7 +436,9 @@ def plot_coefficient_variation(data: dict, out_dir: str):
         cv_vals.append(np.median(ratios) if ratios else 0)
 
     fig, ax = plt.subplots(figsize=(8, 4))
-    colors = plt.cm.RdYlGn_r(1 - np.clip(np.array(cv_vals) / max(cv_vals), 0, 1))
+    cap = np.percentile(cv_vals, 95) if len(cv_vals) > 1 else max(cv_vals)
+    cap = max(cap, 1e-6)
+    colors = plt.cm.RdYlGn_r(1 - np.clip(np.array(cv_vals) / cap, 0, 1))
     bars = ax.bar(range(len(params)), cv_vals, color=colors, edgecolor="k", linewidth=0.5)
     ax.set_xticks(range(len(params)))
     ax.set_xticklabels(params, rotation=45, ha="right", fontsize=8)

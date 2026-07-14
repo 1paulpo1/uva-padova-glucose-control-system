@@ -412,6 +412,13 @@ struct CLIConfig {
   double meal_timing_sd = std::numeric_limits<double>::quiet_NaN();
   double meal_amount_sd = std::numeric_limits<double>::quiet_NaN();
 
+  // Meal generation overrides (any flag set → enables generative mode)
+  double daily_cho_g = std::numeric_limits<double>::quiet_NaN();
+  int n_meals_per_day = -1;
+  double split_cv = std::numeric_limits<double>::quiet_NaN();
+  double time_cv = std::numeric_limits<double>::quiet_NaN();
+  double bolus_u_per_g = std::numeric_limits<double>::quiet_NaN();
+
   // Simulation overrides
   int duration_min = -1;
   int cgm_interval = -1;
@@ -439,6 +446,15 @@ static void apply_cli_overrides(VirtualPatientConfig& cfg, const CLIConfig& cli)
   if (!std::isnan(cli.perturbation_std)) cfg.perturbation_std = cli.perturbation_std;
   if (cli.restarts > 0) cfg.n_cmaes_restarts = cli.restarts;
   if (cli.evals > 0) cfg.cmaes_evals = cli.evals;
+
+  // Meal generation (any flag set → enable)
+  bool meal_gen_set = false;
+  if (!std::isnan(cli.daily_cho_g))   { cfg.meal_generation.daily_cho_g = cli.daily_cho_g; meal_gen_set = true; }
+  if (cli.n_meals_per_day > 0)        { cfg.meal_generation.n_meals_per_day = cli.n_meals_per_day; meal_gen_set = true; }
+  if (!std::isnan(cli.split_cv))      { cfg.meal_generation.split_cv = cli.split_cv; meal_gen_set = true; }
+  if (!std::isnan(cli.time_cv))       { cfg.meal_generation.time_cv = cli.time_cv; meal_gen_set = true; }
+  if (!std::isnan(cli.bolus_u_per_g)) { cfg.meal_generation.bolus_u_per_g = cli.bolus_u_per_g; meal_gen_set = true; }
+  if (meal_gen_set) cfg.meal_generation.enabled = true;
 }
 
 // ===========================================================================
@@ -478,7 +494,13 @@ static void print_help(const char* prog) {
             << "  --lm-iters N         Max Levenberg-Marquardt iterations (default: 100)\n"
             << "  --cmaes-lower F      CMA-ES lower bound in log-space (default: -3)\n"
             << "  --cmaes-upper F      CMA-ES upper bound in log-space (default: 3)\n"
-            << "  --prior-std F        Prior std for all active params (default: from config)\n";
+             << "  --prior-std F        Prior std for all active params (default: from config)\n\n"
+             << "Meal generation (enabled if any flag is set):\n"
+             << "  --daily-cho-g F    Total daily CHO in grams (default: 210)\n"
+             << "  --n-meals N        Number of meals per day (default: 3)\n"
+             << "  --split-cv F       LogNormal CV for CHO split (0=equal, default: 0.3)\n"
+             << "  --time-cv F        LogNormal CV for meal time jitter (0=fixed, default: 0.12)\n"
+             << "  --bolus-u-per-g F  Insulin units per gram CHO (default: 0.1)\n";
 }
 
 // ===========================================================================
@@ -525,6 +547,11 @@ int main(int argc, char** argv) {
     else if (arg == "--cmaes-lower") cli.cmaes_lower = std::stod(next());
     else if (arg == "--cmaes-upper") cli.cmaes_upper = std::stod(next());
     else if (arg == "--prior-std") cli.prior_std = std::stod(next());
+    else if (arg == "--daily-cho-g") cli.daily_cho_g = std::stod(next());
+    else if (arg == "--n-meals") cli.n_meals_per_day = std::stoi(next());
+    else if (arg == "--split-cv") cli.split_cv = std::stod(next());
+    else if (arg == "--time-cv") cli.time_cv = std::stod(next());
+    else if (arg == "--bolus-u-per-g") cli.bolus_u_per_g = std::stod(next());
     else if (arg == "--help") { print_help(argv[0]); return 0; }
     else if (arg.find("--") == 0) {
       std::cerr << "WARNING: unknown flag " << arg << ", ignoring\n";
@@ -580,8 +607,13 @@ int main(int argc, char** argv) {
             << "  CMA-ES evals:   " << cfg.cmaes_evals << "\n"
             << "  LM max iters:   " << lm_max_iters << "\n"
             << "  CMAES bounds:   [" << cmaes_lower << ", " << cmaes_upper << "]\n"
-            << "  Prior std:      " << prior_std << "\n"
-            << "  Verbose:        " << (cli.verbose ? "yes" : "no (output suppressed)") << "\n"
+             << "  Prior std:      " << prior_std << "\n"
+             << "  Meal gen:       " << (cfg.meal_generation.enabled ?
+                 std::to_string(cfg.meal_generation.n_meals_per_day) + " meals, " +
+                 std::to_string(cfg.meal_generation.daily_cho_g) + "g/d, split_CV=" +
+                 std::to_string(cfg.meal_generation.split_cv) + ", time_CV=" +
+                 std::to_string(cfg.meal_generation.time_cv) : "disabled (daily_meals)") << "\n"
+             << "  Verbose:        " << (cli.verbose ? "yes" : "no (output suppressed)") << "\n"
             << "  CSV:            " << cli.csv_path << "\n"
             << "  JSON:           " << cli.json_path << "\n\n";
 

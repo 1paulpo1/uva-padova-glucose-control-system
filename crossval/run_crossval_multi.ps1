@@ -6,6 +6,11 @@ param(
     [int]$Evals           = 1000,
     [int]$LmIters         = 30,
     [string]$ParamsConfig = "config/config_9_active.json",
+    [double]$DailyChoG    = [double]::NaN,
+    [int]$NMeals          = -1,
+    [double]$SplitCv      = [double]::NaN,
+    [double]$TimeCv       = [double]::NaN,
+    [double]$BolusUPerG   = [double]::NaN,
     [array]$Modes         = @(
         @{Name="clean";           Preset="none";  ExtraFlags=""},
         @{Name="cgm10-meal10";    Preset="none";  ExtraFlags="--cgm-rel-sd 10 --meal-timing-shift 10"}
@@ -73,6 +78,12 @@ foreach ($mode in $Modes) {
             "--csv", $csvFile,
             "--json", $jsonFile
         )
+        # Meal generation flags (if set)
+        if ($DailyChoG -eq $DailyChoG)   { $argList += "--daily-cho-g";  $argList += $DailyChoG }
+        if ($NMeals -gt 0)                { $argList += "--n-meals";     $argList += $NMeals }
+        if ($SplitCv -eq $SplitCv)       { $argList += "--split-cv";    $argList += $SplitCv }
+        if ($TimeCv -eq $TimeCv)         { $argList += "--time-cv";     $argList += $TimeCv }
+        if ($BolusUPerG -eq $BolusUPerG) { $argList += "--bolus-u-per-g"; $argList += $BolusUPerG }
 
         # ---- 2d. Launch in a separate PowerShell window ----
         $psCmd = "`$env:Path = '$MingwBin;' + `$env:Path; " +

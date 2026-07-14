@@ -262,6 +262,7 @@ auto IdentificationPipeline<CMAES, LM>::run(
     return fval;
   };
 
+  int cmaes_total_evals = 0;
   for (int restart = 0; restart < n_cmaes_restarts; ++restart) {
     int seed = static_cast<int>(std::random_device{}());
     typename CMAES::Result cmaes_res;
@@ -280,6 +281,7 @@ auto IdentificationPipeline<CMAES, LM>::run(
     }
 
     restart_points.push_back({cmaes_res.best_params, cmaes_res.best_cost});
+    cmaes_total_evals += cmaes_res.n_evals;
 
     std::cout << "  CMA-ES restart " << (restart + 1) << "/"
               << n_cmaes_restarts << ": cost=" << cmaes_res.best_cost
@@ -310,6 +312,10 @@ auto IdentificationPipeline<CMAES, LM>::run(
   }
   result.total_evals = obs_cost.eval_count();
   result.all_restarts = std::move(restart_points);
+  result.best_cma_cost = best_cma_cost;
+  result.cmaes_total_evals = cmaes_total_evals;
+  result.lm_n_iters = lm_res.n_iters;
+  result.lm_converged = lm_res.converged;
 
   if (result.success && !result.params.empty()) {
     int dim = obs_cost.n_params_;

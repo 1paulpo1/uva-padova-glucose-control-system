@@ -83,6 +83,12 @@ struct IdentificationPipeline {
     Eigen::MatrixXd cov_sandwich;  // retained for reference; unused in auto-mode
     std::vector<RestartRecord> all_restarts;  // best point from each CMA-ES restart
 
+    // CMA-ES vs LM breakdown
+    double best_cma_cost{1e20};    // best CMA-ES cost before LM refinement
+    int cmaes_total_evals{0};      // total CMA-ES evaluations across all restarts
+    int lm_n_iters{0};             // number of Ceres LM iterations
+    bool lm_converged{false};      // whether LM converged
+
     Params to_params(const Params& base,
                      const std::vector<ParamDescriptor>& desc) const;
   };

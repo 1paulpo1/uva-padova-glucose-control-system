@@ -701,6 +701,192 @@ def plot_cmaes_landscape(data: dict, out_dir: str):
     logging.info(f"  Saved {out_path}")
 
 
+def plot_evals_histogram(data: dict, out_dir: str):
+    """Stacked histogram of CMA-ES vs LM evaluations per patient."""
+    results = data["results"]
+    has_lm = results and "cmaes_evals" in results[0]
+
+    fig, ax = plt.subplots(figsize=(8, 4))
+    if has_lm:
+        cmaes = np.array([r.get("cmaes_evals", 0) for r in results])
+        lm = np.array([r.get("lm_evals", 0) for r in results])
+        total = cmaes + lm
+        idx = np.argsort(total)
+        ax.bar(range(len(results)), cmaes[idx], label="CMA-ES evals", color="#2196F3", alpha=0.8)
+        ax.bar(range(len(results)), lm[idx], bottom=cmaes[idx], label="LM evals", color="#FF9800", alpha=0.8)
+        ax.set_ylabel("Evaluations")
+        ax.legend(fontsize=7)
+        ax.set_title(f"CMA-ES vs LM evaluations per patient (n={len(results)})")
+    else:
+        evals = [r.get("total_evals", 0) for r in results]
+        ax.hist(evals, bins=30, color="steelblue", alpha=0.8, edgecolor="white")
+        ax.set_xlabel("Total evaluations")
+        ax.set_ylabel("Patients")
+        ax.set_title(f"Total evaluations histogram (n={len(results)})")
+    ax.grid(axis="y", alpha=0.3)
+    ax.tick_params(axis="x", labelsize=5)
+
+    plt.tight_layout()
+    out_path = os.path.join(out_dir, "evals_histogram.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"  Saved {out_path}")
+
+
+def plot_cost_improvement(data: dict, out_dir: str):
+    """Boxplot of cost improvement after LM refinement."""
+    results = data["results"]
+    has_lm = results and "best_cma_cost" in results[0]
+    if not has_lm:
+        logging.warning("  best_cma_cost not in JSON, skipping cost improvement plot")
+        return
+
+    improvements = []
+    for r in results:
+        bcc = r.get("best_cma_cost")
+        final = r.get("cost")
+        if bcc is not None and final is not None and bcc > 0 and bcc < 1e10:
+            improvements.append((bcc - final) / bcc * 100)
+
+    if not improvements:
+        return
+
+    fig, ax = plt.subplots(figsize=(6, 4))
+    bp = ax.boxplot(improvements, vert=True, showmeans=True, meanprops={
+        "marker": "o", "markerfacecolor": "red", "markersize": 4})
+    ax.set_ylabel("Cost improvement (%)")
+    ax.set_title(f"LM refinement: relative cost improvement (n={len(improvements)})")
+    improved = sum(1 for v in improvements if v > 0.01)
+    ax.text(0.5, 0.95, f"LM improved: {improved}/{len(improvements)} ({improved/len(improvements)*100:.0f}%)",
+            transform=ax.transAxes, ha="center", va="top", fontsize=9)
+    ax.set_xticks([])
+
+    out_path = os.path.join(out_dir, "cost_improvement.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"  Saved {out_path}")
+
+
+def plot_evals_vs_accuracy(data: dict, out_dir: str):
+    """Scatter: total_evals vs mean abs error, colored by Gate A."""
+    results = data["results"]
+    params = data["param_names"]
+
+    x = []
+    y = []
+    gate_a_pass = []
+    for r in results:
+        ev = r.get("total_evals", 0)
+        err = r.get("abs_err_log")
+        if not err or all(v is None for v in err):
+            continue
+        mean_err = np.mean([v for v in err if v is not None])
+        x.append(ev)
+        y.append(mean_err)
+        gate_a_pass.append(r.get("gate_a", {}).get("passed", False))
+
+    if len(x) < 3:
+        return
+
+    x = np.array(x)
+    y = np.array(y)
+    colors = ["#4CAF50" if p else "#F44336" for p in gate_a_pass]
+
+    fig, ax = plt.subplots(figsize=(7, 5))
+    ax.scatter(x, y, c=colors, s=30, alpha=0.7, edgecolors="k", linewidths=0.3)
+    ax.set_xlabel("Total evaluations")
+    ax.set_ylabel("Mean |θ_err| (log-space)")
+    ax.set_title("Computational cost vs estimation accuracy")
+    from matplotlib.patches import Patch
+    legend_elements = [Patch(facecolor="#4CAF50", label="Gate A PASS"),
+                       Patch(facecolor="#F44336", label="Gate A FAIL")]
+    ax.legend(handles=legend_elements, fontsize=7)
+    ax.grid(alpha=0.3)
+
+    out_path = os.path.join(out_dir, "evals_vs_accuracy.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"  Saved {out_path}")
+
+
+def plot_error_by_gate(data: dict, out_dir: str):
+    """Grouped bar: mean |err| per parameter split by gate passage."""
+    params = data["param_names"]
+    results = data["results"]
+
+    def mean_err_for_group(group):
+        if not group:
+            return [float("nan")] * len(params)
+        errs = []
+        for r in group:
+            ae = r.get("abs_err_log")
+            if ae and len(ae) >= len(params):
+                errs.append([ae[i] if ae[i] is not None else float("nan") for i in range(len(params))])
+        return np.nanmean(errs, axis=0) if errs else [float("nan")] * len(params)
+
+    # Split by Gate A
+    ga_pass = [r for r in results if r.get("gate_a", {}).get("passed", False)]
+    ga_fail = [r for r in results if not r.get("gate_a", {}).get("passed", False)]
+    # Split by Gate B
+    gb_pass = [r for r in results if r.get("gate_b", {}).get("passed", False)]
+    gb_fail = [r for r in results if not r.get("gate_b", {}).get("passed", False)]
+    # Split by Gate C (n_prior_dominated)
+    gc_low  = [r for r in results if r.get("gate_c", {}).get("n_prior_dominated", 0) <= 2]
+    gc_med  = [r for r in results if 3 <= r.get("gate_c", {}).get("n_prior_dominated", 0) <= 5]
+    gc_high = [r for r in results if r.get("gate_c", {}).get("n_prior_dominated", 0) >= 6]
+
+    x = np.arange(len(params))
+    width = 0.22
+
+    fig, (ax1, ax2, ax3) = plt.subplots(1, 3, figsize=(16, 4.5))
+
+    # Gate A
+    e1 = mean_err_for_group(ga_pass)
+    e2 = mean_err_for_group(ga_fail)
+    ax1.bar(x - width/2, e1, width, label=f"PASS (n={len(ga_pass)})", color="#4CAF50", alpha=0.8)
+    if len(ga_fail) > 0:
+        ax1.bar(x + width/2, e2, width, label=f"FAIL (n={len(ga_fail)})", color="#F44336", alpha=0.8)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(params, rotation=45, fontsize=7)
+    ax1.set_ylabel("Mean |θ_err|")
+    ax1.set_title("Gate A (multiplicity)")
+    ax1.legend(fontsize=6)
+    ax1.grid(axis="y", alpha=0.3)
+
+    # Gate B
+    e1 = mean_err_for_group(gb_pass)
+    e2 = mean_err_for_group(gb_fail)
+    ax2.bar(x - width/2, e1, width, label=f"PASS (n={len(gb_pass)})", color="#4CAF50", alpha=0.8)
+    if len(gb_fail) > 0:
+        ax2.bar(x + width/2, e2, width, label=f"FAIL (n={len(gb_fail)})", color="#F44336", alpha=0.8)
+    ax2.set_xticks(x)
+    ax2.set_xticklabels(params, rotation=45, fontsize=7)
+    ax2.set_ylabel("Mean |θ_err|")
+    ax2.set_title("Gate B (structural adequacy)")
+    ax2.legend(fontsize=6)
+    ax2.grid(axis="y", alpha=0.3)
+
+    # Gate C
+    e_lo = mean_err_for_group(gc_low)
+    e_me = mean_err_for_group(gc_med)
+    e_hi = mean_err_for_group(gc_high)
+    ax3.bar(x - width, e_lo, width, label=f"0-2 dom (n={len(gc_low)})", color="#4CAF50", alpha=0.8)
+    ax3.bar(x,      e_me, width, label=f"3-5 dom (n={len(gc_med)})", color="#FF9800", alpha=0.8)
+    ax3.bar(x + width, e_hi, width, label=f"6+ dom (n={len(gc_high)})", color="#F44336", alpha=0.8)
+    ax3.set_xticks(x)
+    ax3.set_xticklabels(params, rotation=45, fontsize=7)
+    ax3.set_ylabel("Mean |θ_err|")
+    ax3.set_title("Gate C (prior-dominated params)")
+    ax3.legend(fontsize=6)
+    ax3.grid(axis="y", alpha=0.3)
+
+    plt.tight_layout()
+    out_path = os.path.join(out_dir, "error_by_gate.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"  Saved {out_path}")
+
+
 PLOT_REGISTRY = {
     "true_vs_recovered": plot_true_vs_recovered,
     "error_boxplot": plot_error_boxplot,
@@ -714,6 +900,10 @@ PLOT_REGISTRY = {
     "residual_timeseries": plot_residual_timeseries,
     "acf_all": plot_residual_acf,
     "cmaes_landscape": plot_cmaes_landscape,
+    "evals_histogram": plot_evals_histogram,
+    "cost_improvement": plot_cost_improvement,
+    "evals_vs_accuracy": plot_evals_vs_accuracy,
+    "error_by_gate": plot_error_by_gate,
 }
 
 

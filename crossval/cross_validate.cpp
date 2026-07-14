@@ -107,6 +107,11 @@ static json build_json_result(int pid, const IdentificationPipeline<>::Result& i
   j["success"] = ires.success;
   j["cost"] = ires.cost;
   j["total_evals"] = ires.total_evals;
+  j["best_cma_cost"] = ires.best_cma_cost;
+  j["cmaes_evals"] = ires.cmaes_total_evals;
+  j["lm_evals"] = ires.total_evals - ires.cmaes_total_evals;
+  j["lm_n_iters"] = ires.lm_n_iters;
+  j["lm_converged"] = ires.lm_converged;
   j["elapsed_s"] = elapsed_s;
 
   // Gate A

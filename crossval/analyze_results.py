@@ -9,6 +9,7 @@ import sys
 import os
 import math
 import argparse
+import logging
 from collections import defaultdict
 
 try:
@@ -18,7 +19,7 @@ try:
     import matplotlib.pyplot as plt
     import matplotlib.ticker as ticker
 except ImportError:
-    print("ERROR: install numpy + matplotlib: pip install numpy matplotlib")
+    logging.error("ERROR: install numpy + matplotlib: pip install numpy matplotlib")
     sys.exit(1)
 
 
@@ -27,11 +28,29 @@ def load_results(json_path: str) -> dict:
         with open(json_path) as f:
             return json.load(f)
     except FileNotFoundError:
-        print(f"ERROR: file not found: {json_path}")
+        logging.error(f"ERROR: file not found: {json_path}")
         sys.exit(1)
     except json.JSONDecodeError as e:
-        print(f"ERROR: invalid JSON in {json_path}: {e}")
+        logging.error(f"ERROR: invalid JSON in {json_path}: {e}")
         sys.exit(1)
+
+
+def get_successful(results):
+    """Return list of successful identification results."""
+    return [r for r in results if r.get("success", False)]
+
+
+def filter_results(results, gate_a=None, gate_b=None, patient_range=None):
+    """Filter results by success, gate passage, and patient ID range."""
+    out = get_successful(results)
+    if gate_a:
+        out = [r for r in out if r.get("gate_a", {}).get("passed", False)]
+    if gate_b:
+        out = [r for r in out if r.get("gate_b", {}).get("passed", False)]
+    if patient_range:
+        lo, hi = patient_range
+        out = [r for r in out if lo <= r.get("patient_id", -1) <= hi]
+    return out
 
 
 def plot_true_vs_recovered(data: dict, out_dir: str):
@@ -39,7 +58,7 @@ def plot_true_vs_recovered(data: dict, out_dir: str):
     params = data["param_names"]
     results = data["results"]
     n_params = len(params)
-    n_success = sum(1 for r in results if r.get("success", False))
+    n_success = len(get_successful(results))
 
     n_cols = 5
     n_rows = (n_params + n_cols - 1) // n_cols
@@ -52,8 +71,6 @@ def plot_true_vs_recovered(data: dict, out_dir: str):
         true_vals = []
         rec_vals = []
         for r in results:
-            if not r.get("success", False):
-                continue
             theta_true = r.get("theta_true")
             theta_rec = r.get("theta_rec")
             if theta_true is None or theta_rec is None or i >= len(theta_true) or i >= len(theta_rec):
@@ -91,7 +108,7 @@ def plot_true_vs_recovered(data: dict, out_dir: str):
     out_path = os.path.join(out_dir, "true_vs_recovered.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    logging.info(f"  Saved {out_path}")
 
 
 def plot_error_boxplot(data: dict, out_dir: str):
@@ -101,8 +118,6 @@ def plot_error_boxplot(data: dict, out_dir: str):
 
     err_by_param = defaultdict(list)
     for r in results:
-        if not r.get("success", False):
-            continue
         abs_err = r.get("abs_err_log")
         if abs_err is None:
             continue
@@ -121,7 +136,7 @@ def plot_error_boxplot(data: dict, out_dir: str):
             values.append(err_by_param[pname])
 
     if not values:
-        print("  No data for error boxplot")
+        logging.warning("  No data for error boxplot")
         return
 
     fig, ax = plt.subplots(figsize=(14, 5))
@@ -137,7 +152,7 @@ def plot_error_boxplot(data: dict, out_dir: str):
     out_path = os.path.join(out_dir, "error_boxplot.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    logging.info(f"  Saved {out_path}")
 
 
 def plot_error_vs_phys_magnitude(data: dict, out_dir: str):
@@ -156,8 +171,6 @@ def plot_error_vs_phys_magnitude(data: dict, out_dir: str):
         phys_vals = []
         errs = []
         for r in results:
-            if not r.get("success", False):
-                continue
             ptp = r.get("param_true_phys")
             aep = r.get("abs_err_phys")
             if ptp is None or aep is None or i >= len(ptp) or i >= len(aep):
@@ -184,7 +197,7 @@ def plot_error_vs_phys_magnitude(data: dict, out_dir: str):
     out_path = os.path.join(out_dir, "relerr_vs_phys.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    logging.info(f"  Saved {out_path}")
 
 
 def plot_gate_summary(data: dict, out_dir: str):
@@ -226,7 +239,7 @@ def plot_gate_summary(data: dict, out_dir: str):
     out_path = os.path.join(out_dir, "gate_summary.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    logging.info(f"  Saved {out_path}")
 
 
 def plot_pca_tsne(data: dict, out_dir: str):
@@ -234,18 +247,17 @@ def plot_pca_tsne(data: dict, out_dir: str):
     params = data["param_names"]
     results = data["results"]
 
-    succ = [r for r in results if r.get("success", False) and r.get("theta_rec") is not None]
-    theta = [r["theta_rec"] for r in succ]
-    costs = [r.get("cost", float("nan")) for r in succ]
+    theta = [r["theta_rec"] for r in results if r.get("theta_rec") is not None]
+    costs = [r.get("cost", float("nan")) for r in results]
     if len(theta) < 3:
-        print("  Too few points for PCA/t-SNE")
+        logging.warning("  Too few points for PCA/t-SNE")
         return
 
     try:
         from sklearn.decomposition import PCA
         from sklearn.manifold import TSNE
     except ImportError:
-        print("  sklearn not available, skipping PCA/t-SNE")
+        logging.warning("  sklearn not available, skipping PCA/t-SNE")
         return
 
     X = np.array(theta)
@@ -281,16 +293,15 @@ def plot_pca_tsne(data: dict, out_dir: str):
     out_path = os.path.join(out_dir, "pca_tsne.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    logging.info(f"  Saved {out_path}")
 
 
 def plot_cost_vs_clusters(data: dict, out_dir: str):
     """Scatter: cost vs n_clusters (gate A), annotated by patient ID."""
     results = data["results"]
-    succ = [r for r in results if r.get("success", False)]
-    costs = [r["cost"] for r in succ]
-    n_cl = [r.get("gate_a", {}).get("n_clusters", 0) for r in succ]
-    pids = [r.get("patient_id", -1) for r in succ]
+    costs = [r["cost"] for r in results]
+    n_cl = [r.get("gate_a", {}).get("n_clusters", 0) for r in results]
+    pids = [r.get("patient_id", -1) for r in results]
     if not costs:
         return
 
@@ -308,17 +319,17 @@ def plot_cost_vs_clusters(data: dict, out_dir: str):
     out_path = os.path.join(out_dir, "cost_vs_clusters.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    logging.info(f"  Saved {out_path}")
 
 
 def plot_error_correlation_heatmap(data: dict, out_dir: str):
     """Heatmap of Pearson correlation between parameter errors."""
     params = data["param_names"]
     results = data["results"]
-    errs = [r["abs_err_log"] for r in results if r.get("success", False)]
+    errs = [r["abs_err_log"] for r in results]
     errs = [e for e in errs if e is not None and all(v is not None for v in e)]
     if len(errs) < 3:
-        print("  Too few valid error vectors for correlation heatmap")
+        logging.warning("  Too few valid error vectors for correlation heatmap")
         return
     X = np.array(errs)
     C = np.corrcoef(X.T)
@@ -341,7 +352,7 @@ def plot_error_correlation_heatmap(data: dict, out_dir: str):
     out_path = os.path.join(out_dir, "error_correlation_heatmap.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    logging.info(f"  Saved {out_path}")
 
 
 def plot_pca_with_true(data: dict, out_dir: str):
@@ -353,7 +364,7 @@ def plot_pca_with_true(data: dict, out_dir: str):
     except ImportError:
         return
 
-    succ = [r for r in results if r.get("success", False) and r.get("theta_rec") is not None and r.get("theta_true") is not None]
+    succ = [r for r in results if r.get("theta_rec") is not None and r.get("theta_true") is not None]
     theta_r = np.array([r["theta_rec"] for r in succ])
     theta_t = np.array([r["theta_true"] for r in succ])
     costs = np.array([r.get("cost", float("nan")) for r in succ])
@@ -390,7 +401,7 @@ def plot_pca_with_true(data: dict, out_dir: str):
     out_path = os.path.join(out_dir, "pca_vs_true.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    logging.info(f"  Saved {out_path}")
 
 
 def plot_coefficient_variation(data: dict, out_dir: str):
@@ -402,8 +413,6 @@ def plot_coefficient_variation(data: dict, out_dir: str):
     for i, pname in enumerate(params):
         ratios = []
         for r in results:
-            if not r.get("success", False):
-                continue
             abs_err = r.get("abs_err_log")
             theta_true = r.get("theta_true")
             if abs_err is None or theta_true is None or i >= len(abs_err) or i >= len(theta_true):
@@ -426,15 +435,15 @@ def plot_coefficient_variation(data: dict, out_dir: str):
     out_path = os.path.join(out_dir, "coeff_variation.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    logging.info(f"  Saved {out_path}")
 
 
 def print_detailed_gate_table(data: dict):
     """Print per-patient gate summary."""
     results = data["results"]
     headers = ["PID", "Cost", "nClust", "GateA", "GateB", "nDom", "LjungQ"]
-    print(f"{headers[0]:>4} {headers[1]:>10} {headers[2]:>6} {headers[3]:>6} {headers[4]:>6} {headers[5]:>5} {headers[6]:>10}")
-    print(f"{'-'*4} {'-'*10} {'-'*6} {'-'*6} {'-'*6} {'-'*5} {'-'*10}")
+    logging.info(f"{headers[0]:>4} {headers[1]:>10} {headers[2]:>6} {headers[3]:>6} {headers[4]:>6} {headers[5]:>5} {headers[6]:>10}")
+    logging.info(f"{'-'*4} {'-'*10} {'-'*6} {'-'*6} {'-'*6} {'-'*5} {'-'*10}")
     for r in results:
         pid = r.get("patient_id", -1)
         cost = r.get("cost", float("nan"))
@@ -446,28 +455,26 @@ def print_detailed_gate_table(data: dict):
         gb = "PASS" if gate_b.get("passed", False) else "FAIL"
         nd = gate_c.get("n_prior_dominated", 0)
         lq = gate_b.get("lb_q", 0.0)
-        print(f"{pid:>4} {cost:>10.4f} {nc:>6} {ga:>6} {gb:>6} {nd:>5} {lq:>10.1f}")
-    print()
+        logging.info(f"{pid:>4} {cost:>10.4f} {nc:>6} {ga:>6} {gb:>6} {nd:>5} {lq:>10.1f}")
+    logging.info("")
 
 
 def print_summary_table(data: dict):
     """Print per-parameter recovery stats."""
     params = data["param_names"]
     results = data["results"]
-    n_success = sum(1 for r in results if r.get("success", False))
+    n_success = len(results)
 
-    print(f"\n{'=' * 90}")
-    print(f"{'Parameter':<12} {'n_rec':>5} {'Mean |err|':>12} {'Median |err|':>14} "
+    logging.info(f"\n{'=' * 90}")
+    logging.info(f"{'Parameter':<12} {'n_rec':>5} {'Mean |err|':>12} {'Median |err|':>14} "
           f"{'P25':>8} {'P75':>8} {'Mean rel%':>10}")
-    print(f"{'=' * 90}")
+    logging.info(f"{'=' * 90}")
 
     for i, pname in enumerate(params):
         errs = []
         phys_true = []
         phys_rec = []
         for r in results:
-            if not r["success"]:
-                continue
             e = r["abs_err_log"][i]
             if e is not None:
                 errs.append(e)
@@ -489,11 +496,11 @@ def print_summary_table(data: dict):
         rel_errs = [abs(pr - pt) / abs(pt) * 100 for pt, pr in zip(phys_true, phys_rec)]
         mean_rel = np.mean(rel_errs) if rel_errs else float("nan")
 
-        print(f"{pname:<12} {len(errs):>5} {mean_err:>12.4f} {med_err:>14.4f} "
+        logging.info(f"{pname:<12} {len(errs):>5} {mean_err:>12.4f} {med_err:>14.4f} "
               f"{p25:>8.4f} {p75:>8.4f} {mean_rel:>9.2f}%")
 
-    print(f"{'=' * 90}")
-    print(f"\nTotal patients: {len(results)} | Successful identifications: {n_success}\n")
+    logging.info(f"{'=' * 90}")
+    logging.info(f"\nTotal patients: {len(results)} | Successful identifications: {n_success}\n")
 
 
 def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
@@ -503,7 +510,7 @@ def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
     except ImportError:
         plot_acf = None
 
-    results = [r for r in data["results"] if r["success"] and "cgm_residuals" in r]
+    results = [r for r in data["results"] if "cgm_residuals" in r]
     if not results:
         return
     results.sort(key=lambda r: r["cost"])
@@ -582,7 +589,7 @@ def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
         out_path = os.path.join(out_dir, f"residuals_p{r['patient_id']}.png")
         fig.savefig(out_path, dpi=150, bbox_inches="tight")
         plt.close(fig)
-        print(f"  Saved {out_path}")
+        logging.info(f"  Saved {out_path}")
 
 
 def plot_residual_acf(data: dict, out_dir: str):
@@ -592,7 +599,7 @@ def plot_residual_acf(data: dict, out_dir: str):
     except ImportError:
         plot_acf = None
 
-    results = [r for r in data["results"] if r["success"] and "cgm_residuals" in r]
+    results = [r for r in data["results"] if "cgm_residuals" in r]
     if not results:
         return
 
@@ -632,12 +639,12 @@ def plot_residual_acf(data: dict, out_dir: str):
     out_path = os.path.join(out_dir, "acf_all.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    logging.info(f"  Saved {out_path}")
 
 
 def plot_cmaes_landscape(data: dict, out_dir: str):
     """Small-multiples: PCA of CMA-ES restart points, colored by DBSCAN cluster."""
-    results = [r for r in data["results"] if r.get("success", False) and "restarts" in r and len(r["restarts"]) >= 3]
+    results = [r for r in data["results"] if "restarts" in r and len(r["restarts"]) >= 3]
     if not results:
         return
 
@@ -691,7 +698,23 @@ def plot_cmaes_landscape(data: dict, out_dir: str):
     out_path = os.path.join(out_dir, "cmaes_landscape_all.png")
     fig.savefig(out_path, dpi=150, bbox_inches="tight")
     plt.close(fig)
-    print(f"  Saved {out_path}")
+    logging.info(f"  Saved {out_path}")
+
+
+PLOT_REGISTRY = {
+    "true_vs_recovered": plot_true_vs_recovered,
+    "error_boxplot": plot_error_boxplot,
+    "error_vs_phys_magnitude": plot_error_vs_phys_magnitude,
+    "gate_summary": plot_gate_summary,
+    "pca_tsne": plot_pca_tsne,
+    "cost_vs_clusters": plot_cost_vs_clusters,
+    "error_correlation_heatmap": plot_error_correlation_heatmap,
+    "pca_vs_true": plot_pca_with_true,
+    "coeff_variation": plot_coefficient_variation,
+    "residual_timeseries": plot_residual_timeseries,
+    "acf_all": plot_residual_acf,
+    "cmaes_landscape": plot_cmaes_landscape,
+}
 
 
 def main():
@@ -702,29 +725,58 @@ def main():
                         help="Output directory for plots (default: current dir)")
     parser.add_argument("--no-plots", action="store_true",
                         help="Skip plots, only print summary table")
+    parser.add_argument("--plot", default="",
+                        help="Comma-separated plot names to generate (default: all). "
+                             f"Available: {', '.join(PLOT_REGISTRY)}")
+    parser.add_argument("--gate-a", action="store_true",
+                        help="Only include patients passing Gate A")
+    parser.add_argument("--gate-b", action="store_true",
+                        help="Only include patients passing Gate B")
+    parser.add_argument("--patient-start", type=int, default=None,
+                        help="Minimum patient ID (inclusive)")
+    parser.add_argument("--patient-end", type=int, default=None,
+                        help="Maximum patient ID (inclusive)")
+    parser.add_argument("--verbose", action="store_true",
+                        help="Enable debug-level logging")
     args = parser.parse_args()
 
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(message)s")
+
     if not os.path.exists(args.json):
-        print(f"ERROR: {args.json} not found. Run cross_validate first.")
+        logging.error(f"ERROR: {args.json} not found. Run cross_validate first.")
         sys.exit(1)
 
     data = load_results(args.json)
     os.makedirs(args.out, exist_ok=True)
 
+    # Apply filters
+    patient_range = None
+    if args.patient_start is not None or args.patient_end is not None:
+        patient_range = (args.patient_start or 0, args.patient_end or 999999)
+    filtered = filter_results(data["results"], gate_a=args.gate_a,
+                              gate_b=args.gate_b, patient_range=patient_range)
+    if patient_range:
+        logging.info(f"Patient range: {patient_range}")
+    if args.gate_a or args.gate_b:
+        logging.info(f"Filtered: {len(get_successful(data['results']))} successful "
+                     f"-> {len(filtered)} after gate/range filters")
+    data["results"] = filtered
+
     if not args.no_plots:
-        print("Generating plots...")
-        plot_true_vs_recovered(data, args.out)
-        plot_error_boxplot(data, args.out)
-        plot_error_vs_phys_magnitude(data, args.out)
-        plot_gate_summary(data, args.out)
-        plot_pca_tsne(data, args.out)
-        plot_cost_vs_clusters(data, args.out)
-        plot_error_correlation_heatmap(data, args.out)
-        plot_pca_with_true(data, args.out)
-        plot_coefficient_variation(data, args.out)
-        plot_residual_timeseries(data, args.out)
-        plot_residual_acf(data, args.out)
-        plot_cmaes_landscape(data, args.out)
+        if args.plot:
+            names = [n.strip() for n in args.plot.split(",")]
+            unknown = [n for n in names if n not in PLOT_REGISTRY]
+            if unknown:
+                logging.error(f"Unknown plot(s): {unknown}. Available: {list(PLOT_REGISTRY)}")
+                sys.exit(1)
+        else:
+            names = list(PLOT_REGISTRY)
+
+        logging.info("Generating plots...")
+        for name in names:
+            PLOT_REGISTRY[name](data, args.out)
 
     print_detailed_gate_table(data)
     print_summary_table(data)

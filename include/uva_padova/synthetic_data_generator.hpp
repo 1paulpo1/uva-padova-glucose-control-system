@@ -26,6 +26,14 @@ struct SyntheticDataConfig {
   double meal_skip_prob{0.0};         // probability of skipping a meal entirely
   double meal_timing_shift_sd{0.0};   // std dev of time reporting error [min]
   double meal_amount_noise_sd{0.0};   // std dev of CHO fraction (0.15 = 15%)
+
+  // Insulin errors (bolus)
+  double bolus_skip_prob{0.0};        // probability of skipping a bolus
+  double bolus_dose_cv{0.0};          // LogNormal CV for bolus dose error
+  double bolus_timing_shift_sd{0.0};  // std dev of bolus timing error [min]
+
+  // Insulin errors (basal)
+  double basal_rate_cv{0.0};          // LogNormal CV for basal rate error
 };
 
 // ---------------------------------------------------------------------------
@@ -105,7 +113,11 @@ SyntheticDataResult generate_synthetic_data(
                      config.dropout_prob > 0.0 ||
                      config.meal_skip_prob > 0.0 ||
                      config.meal_timing_shift_sd > 0.0 ||
-                     config.meal_amount_noise_sd > 0.0);
+                     config.meal_amount_noise_sd > 0.0 ||
+                     config.bolus_skip_prob > 0.0 ||
+                     config.bolus_dose_cv > 0.0 ||
+                     config.bolus_timing_shift_sd > 0.0 ||
+                     config.basal_rate_cv > 0.0);
 
   if (!rich_noise) {
     // Simple i.i.d. Gaussian noise (original behavior)
@@ -161,6 +173,32 @@ SyntheticDataResult generate_synthetic_data(
     double reported_cho = config.meals[i].second * noise_factor;
 
     reported_meals.emplace_back(reported_t, reported_cho);
+  }
+
+  // 1b. Apply errors to boluses
+  std::lognormal_distribution<double> bolus_dose_noise(0.0, config.bolus_dose_cv);
+  std::normal_distribution<double> bolus_timing_shift(0.0, config.bolus_timing_shift_sd);
+
+  std::vector<std::pair<double, double>> reported_boluses;
+  for (size_t i = 0; i < config.boluses.size(); ++i) {
+    if (config.bolus_skip_prob > 0.0 && uniform01(rng) < config.bolus_skip_prob)
+      continue;
+
+    int shift = static_cast<int>(std::round(bolus_timing_shift(rng)));
+    double reported_t = std::max(0.0, config.boluses[i].first + static_cast<double>(shift));
+
+    double dose_factor = (config.bolus_dose_cv > 0.0) ? bolus_dose_noise(rng) : 1.0;
+    double reported_dose = config.boluses[i].second * dose_factor;
+
+    reported_boluses.emplace_back(reported_t, reported_dose);
+  }
+
+  // 1c. Apply errors to basal rate
+  std::lognormal_distribution<double> basal_noise(0.0, config.basal_rate_cv);
+  std::vector<std::pair<double, double>> reported_insulin;
+  for (const auto& ins : config.insulin) {
+    double rate_factor = (config.basal_rate_cv > 0.0) ? basal_noise(rng) : 1.0;
+    reported_insulin.emplace_back(ins.first, ins.second * rate_factor);
   }
 
   // 2. Apply CGM noise + dropouts
@@ -219,10 +257,14 @@ SyntheticDataResult generate_synthetic_data(
     result.data.meal_time.push_back(rm.first);
     result.data.meal_cho.push_back(rm.second);
   }
-  result.data.bolus_time = scaffold.bolus_time;
-  result.data.bolus_dose = scaffold.bolus_dose;
-  result.data.insulin_time = scaffold.insulin_time;
-  result.data.insulin_rate = scaffold.insulin_rate;
+  for (const auto& rb : reported_boluses) {
+    result.data.bolus_time.push_back(rb.first);
+    result.data.bolus_dose.push_back(rb.second);
+  }
+  for (const auto& ri : reported_insulin) {
+    result.data.insulin_time.push_back(ri.first);
+    result.data.insulin_rate.push_back(ri.second);
+  }
   result.data.finalize();
 
   // Clean data: noiseless CGM, true meals

@@ -170,6 +170,11 @@ VirtualPatientResult generate_virtual_patient(
   gen_cfg.meal_timing_shift_sd = config.meal_errors.timing_shift_sd;
   gen_cfg.meal_amount_noise_sd = config.meal_errors.amount_noise_sd;
 
+  gen_cfg.bolus_skip_prob = config.insulin_errors.bolus_skip_prob;
+  gen_cfg.bolus_dose_cv = config.insulin_errors.bolus_dose_cv;
+  gen_cfg.bolus_timing_shift_sd = config.insulin_errors.bolus_timing_shift_sd;
+  gen_cfg.basal_rate_cv = config.insulin_errors.basal_rate_cv;
+
   for (const auto& m : true_meals)
     gen_cfg.meals.emplace_back(static_cast<double>(m.t_min), m.cho_mg);
   for (const auto& b : true_boluses)

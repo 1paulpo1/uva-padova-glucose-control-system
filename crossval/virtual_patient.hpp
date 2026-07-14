@@ -21,6 +21,16 @@ struct CGMNoiseConfig {
 };
 
 // ---------------------------------------------------------------------------
+// Insulin error configuration (applied to both bolus and basal)
+// ---------------------------------------------------------------------------
+struct InsulinErrorConfig {
+  double bolus_skip_prob{0.0};        // probability of skipping a bolus
+  double bolus_dose_cv{0.0};          // LogNormal CV for bolus dose error
+  double bolus_timing_shift_sd{0.0};  // std dev of bolus timing error [min]
+  double basal_rate_cv{0.0};          // LogNormal CV for basal rate error
+};
+
+// ---------------------------------------------------------------------------
 // Meal error configuration
 // ---------------------------------------------------------------------------
 struct MealErrorConfig {
@@ -55,6 +65,7 @@ struct VirtualPatientConfig {
   std::string params_config_path;  // path to JSON param descriptors (empty = default)
 
   CGMNoiseConfig cgm_noise;
+  InsulinErrorConfig insulin_errors;
   MealErrorConfig meal_errors;
   MealGenerationConfig meal_generation;
 

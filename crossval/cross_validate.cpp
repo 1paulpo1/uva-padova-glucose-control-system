@@ -335,6 +335,14 @@ static void load_json_config(VirtualPatientConfig& cfg, const std::string& path)
     if (auto v = it->find("dropout_prob"); v != it->end()) cfg.cgm_noise.dropout_prob = v->get<double>();
   }
 
+  // Insulin errors
+  if (auto it = j.find("insulin_errors"); it != j.end()) {
+    if (auto v = it->find("bolus_skip_prob"); v != it->end()) cfg.insulin_errors.bolus_skip_prob = v->get<double>();
+    if (auto v = it->find("bolus_dose_cv"); v != it->end()) cfg.insulin_errors.bolus_dose_cv = v->get<double>();
+    if (auto v = it->find("bolus_timing_shift_sd"); v != it->end()) cfg.insulin_errors.bolus_timing_shift_sd = v->get<double>();
+    if (auto v = it->find("basal_rate_cv"); v != it->end()) cfg.insulin_errors.basal_rate_cv = v->get<double>();
+  }
+
   // Meal errors
   if (auto it = j.find("meal_errors"); it != j.end()) {
     if (auto v = it->find("skip_prob"); v != it->end()) cfg.meal_errors.skip_prob = v->get<double>();
@@ -417,6 +425,12 @@ struct CLIConfig {
   double meal_timing_sd = std::numeric_limits<double>::quiet_NaN();
   double meal_amount_sd = std::numeric_limits<double>::quiet_NaN();
 
+  // Insulin error overrides
+  double bolus_skip_prob = std::numeric_limits<double>::quiet_NaN();
+  double bolus_dose_cv = std::numeric_limits<double>::quiet_NaN();
+  double bolus_timing_sd = std::numeric_limits<double>::quiet_NaN();
+  double basal_rate_cv = std::numeric_limits<double>::quiet_NaN();
+
   // Meal generation overrides (any flag set → enables generative mode)
   double daily_cho_g = std::numeric_limits<double>::quiet_NaN();
   int n_meals_per_day = -1;
@@ -446,6 +460,10 @@ static void apply_cli_overrides(VirtualPatientConfig& cfg, const CLIConfig& cli)
   if (!std::isnan(cli.meal_skip_prob)) cfg.meal_errors.skip_prob = cli.meal_skip_prob;
   if (!std::isnan(cli.meal_timing_sd)) cfg.meal_errors.timing_shift_sd = cli.meal_timing_sd;
   if (!std::isnan(cli.meal_amount_sd)) cfg.meal_errors.amount_noise_sd = cli.meal_amount_sd;
+  if (!std::isnan(cli.bolus_skip_prob)) cfg.insulin_errors.bolus_skip_prob = cli.bolus_skip_prob;
+  if (!std::isnan(cli.bolus_dose_cv)) cfg.insulin_errors.bolus_dose_cv = cli.bolus_dose_cv;
+  if (!std::isnan(cli.bolus_timing_sd)) cfg.insulin_errors.bolus_timing_shift_sd = cli.bolus_timing_sd;
+  if (!std::isnan(cli.basal_rate_cv)) cfg.insulin_errors.basal_rate_cv = cli.basal_rate_cv;
   if (cli.duration_min > 0) cfg.duration_min = cli.duration_min;
   if (cli.cgm_interval > 0) cfg.cgm_interval = cli.cgm_interval;
   if (!std::isnan(cli.perturbation_std)) cfg.perturbation_std = cli.perturbation_std;
@@ -489,6 +507,11 @@ static void print_help(const char* prog) {
             << "  --meal-skip-prob F     Probability of skipping a meal (default: varies)\n"
             << "  --meal-timing-shift F  Std dev of time reporting error [min] (default: varies)\n"
             << "  --meal-amount-noise F  Std dev of CHO fraction (default: varies)\n\n"
+            << "Insulin error overrides:\n"
+            << "  --bolus-skip-prob F     Probability of skipping a bolus (default: varies)\n"
+            << "  --bolus-dose-cv F       LogNormal CV for bolus dose error (default: varies)\n"
+            << "  --bolus-timing-shift F  Std dev of bolus timing error [min] (default: varies)\n"
+            << "  --basal-rate-cv F       LogNormal CV for basal rate error (default: varies)\n\n"
             << "Simulation overrides:\n"
             << "  --duration-min N     Simulation length [min] (default: 4320)\n"
             << "  --cgm-interval N     CGM sampling interval [min] (default: 5)\n"
@@ -543,6 +566,10 @@ int main(int argc, char** argv) {
     else if (arg == "--meal-skip-prob") cli.meal_skip_prob = std::stod(next());
     else if (arg == "--meal-timing-shift") cli.meal_timing_sd = std::stod(next());
     else if (arg == "--meal-amount-noise") cli.meal_amount_sd = std::stod(next());
+    else if (arg == "--bolus-skip-prob") cli.bolus_skip_prob = std::stod(next());
+    else if (arg == "--bolus-dose-cv") cli.bolus_dose_cv = std::stod(next());
+    else if (arg == "--bolus-timing-shift") cli.bolus_timing_sd = std::stod(next());
+    else if (arg == "--basal-rate-cv") cli.basal_rate_cv = std::stod(next());
     else if (arg == "--duration-min") cli.duration_min = std::stoi(next());
     else if (arg == "--cgm-interval") cli.cgm_interval = std::stoi(next());
     else if (arg == "--perturbation-std") cli.perturbation_std = std::stod(next());
@@ -617,7 +644,15 @@ int main(int argc, char** argv) {
                  std::to_string(cfg.meal_generation.n_meals_per_day) + " meals, " +
                  std::to_string(cfg.meal_generation.daily_cho_g) + "g/d, split_CV=" +
                  std::to_string(cfg.meal_generation.split_cv) + ", time_CV=" +
-                 std::to_string(cfg.meal_generation.time_cv) : "disabled (daily_meals)") << "\n"
+                  std::to_string(cfg.meal_generation.time_cv) : "disabled (daily_meals)") << "\n"
+             << "  ╶ Bolus skip:   " << (cfg.insulin_errors.bolus_skip_prob > 0 ?
+                 std::to_string(cfg.insulin_errors.bolus_skip_prob * 100) + "%" : "none") << "\n"
+             << "  ╶ Bolus dose CV:" << (cfg.insulin_errors.bolus_dose_cv > 0 ?
+                 std::to_string(cfg.insulin_errors.bolus_dose_cv) : "none") << "\n"
+             << "  ╶ Bolus timing: " << (cfg.insulin_errors.bolus_timing_shift_sd > 0 ?
+                 std::to_string(cfg.insulin_errors.bolus_timing_shift_sd) + " min" : "none") << "\n"
+             << "  ╶ Basal rate CV:" << (cfg.insulin_errors.basal_rate_cv > 0 ?
+                 std::to_string(cfg.insulin_errors.basal_rate_cv) : "none") << "\n"
              << "  Verbose:        " << (cli.verbose ? "yes" : "no (output suppressed)") << "\n"
             << "  CSV:            " << cli.csv_path << "\n"
             << "  JSON:           " << cli.json_path << "\n\n";
@@ -669,7 +704,11 @@ int main(int argc, char** argv) {
                              cfg.cgm_noise.dropout_prob > 0 ||
                              cfg.meal_errors.timing_shift_sd > 0 ||
                              cfg.meal_errors.skip_prob > 0 ||
-                             cfg.meal_errors.amount_noise_sd > 0);
+                             cfg.meal_errors.amount_noise_sd > 0 ||
+                             cfg.insulin_errors.bolus_skip_prob > 0 ||
+                             cfg.insulin_errors.bolus_dose_cv > 0 ||
+                             cfg.insulin_errors.bolus_timing_shift_sd > 0 ||
+                             cfg.insulin_errors.basal_rate_cv > 0);
       if (cost_true > 1.0) {
         if (data_has_noise) {
           std::cout << "  [sanity] (cost>0 expected — noisy data)\n";
@@ -821,6 +860,10 @@ int main(int argc, char** argv) {
   jout["config"]["meal_errors"]["skip_prob"] = cfg.meal_errors.skip_prob;
   jout["config"]["meal_errors"]["timing_shift_sd"] = cfg.meal_errors.timing_shift_sd;
   jout["config"]["meal_errors"]["amount_noise_sd"] = cfg.meal_errors.amount_noise_sd;
+  jout["config"]["insulin_errors"]["bolus_skip_prob"] = cfg.insulin_errors.bolus_skip_prob;
+  jout["config"]["insulin_errors"]["bolus_dose_cv"] = cfg.insulin_errors.bolus_dose_cv;
+  jout["config"]["insulin_errors"]["bolus_timing_shift_sd"] = cfg.insulin_errors.bolus_timing_shift_sd;
+  jout["config"]["insulin_errors"]["basal_rate_cv"] = cfg.insulin_errors.basal_rate_cv;
   jout["config"]["optimizer"]["restarts"] = cfg.n_cmaes_restarts;
   jout["config"]["optimizer"]["cmaes_evals"] = cfg.cmaes_evals;
   jout["config"]["optimizer"]["lm_max_iters"] = lm_max_iters;

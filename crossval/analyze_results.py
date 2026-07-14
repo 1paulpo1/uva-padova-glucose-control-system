@@ -23,8 +23,15 @@ except ImportError:
 
 
 def load_results(json_path: str) -> dict:
-    with open(json_path) as f:
-        return json.load(f)
+    try:
+        with open(json_path) as f:
+            return json.load(f)
+    except FileNotFoundError:
+        print(f"ERROR: file not found: {json_path}")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"ERROR: invalid JSON in {json_path}: {e}")
+        sys.exit(1)
 
 
 def plot_true_vs_recovered(data: dict, out_dir: str):
@@ -32,7 +39,7 @@ def plot_true_vs_recovered(data: dict, out_dir: str):
     params = data["param_names"]
     results = data["results"]
     n_params = len(params)
-    n_success = sum(1 for r in results if r["success"])
+    n_success = sum(1 for r in results if r.get("success", False))
 
     n_cols = 5
     n_rows = (n_params + n_cols - 1) // n_cols
@@ -45,10 +52,14 @@ def plot_true_vs_recovered(data: dict, out_dir: str):
         true_vals = []
         rec_vals = []
         for r in results:
-            if not r["success"]:
+            if not r.get("success", False):
                 continue
-            tv = r["theta_true"][i]
-            rv = r["theta_rec"][i]
+            theta_true = r.get("theta_true")
+            theta_rec = r.get("theta_rec")
+            if theta_true is None or theta_rec is None or i >= len(theta_true) or i >= len(theta_rec):
+                continue
+            tv = theta_true[i]
+            rv = theta_rec[i]
             if tv is not None and rv is not None:
                 true_vals.append(tv)
                 rec_vals.append(rv)
@@ -90,10 +101,15 @@ def plot_error_boxplot(data: dict, out_dir: str):
 
     err_by_param = defaultdict(list)
     for r in results:
-        if not r["success"]:
+        if not r.get("success", False):
+            continue
+        abs_err = r.get("abs_err_log")
+        if abs_err is None:
             continue
         for i, pname in enumerate(params):
-            e = r["abs_err_log"][i]
+            if i >= len(abs_err):
+                continue
+            e = abs_err[i]
             if e is not None:
                 err_by_param[pname].append(e)
 
@@ -132,10 +148,14 @@ def plot_error_vs_phys_magnitude(data: dict, out_dir: str):
         phys_vals = []
         errs = []
         for r in results:
-            if not r["success"]:
+            if not r.get("success", False):
                 continue
-            pv = r["param_true_phys"][i]
-            ae = r["abs_err_phys"][i]
+            ptp = r.get("param_true_phys")
+            aep = r.get("abs_err_phys")
+            if ptp is None or aep is None or i >= len(ptp) or i >= len(aep):
+                continue
+            pv = ptp[i]
+            ae = aep[i]
             if pv is not None and ae is not None and pv > 1e-10:
                 phys_vals.append(pv)
                 errs.append(abs(ae / pv) * 100)  # relative %
@@ -160,12 +180,11 @@ def plot_gate_summary(data: dict, out_dir: str):
     results = data["results"]
     n_total = len(results)
 
-    ga_pass = sum(1 for r in results if r["gate_a"]["passed"])
-    gb_pass = sum(1 for r in results if r["gate_b"]["passed"])
-    # gate C is not pass/fail, show average dominated
+    ga_pass = sum(1 for r in results if r.get("gate_a", {}).get("passed", False))
+    gb_pass = sum(1 for r in results if r.get("gate_b", {}).get("passed", False))
     gc_dominated = []
     for r in results:
-        gc_dominated.append(r["gate_c"]["n_prior_dominated"])
+        gc_dominated.append(r.get("gate_c", {}).get("n_prior_dominated", 0))
     avg_gc = np.mean(gc_dominated) if gc_dominated else 0
 
     fig, (ax1, ax2) = plt.subplots(1, 2, figsize=(8, 4))
@@ -203,8 +222,9 @@ def plot_pca_tsne(data: dict, out_dir: str):
     params = data["param_names"]
     results = data["results"]
 
-    theta = [r["theta_rec"] for r in results if r["success"]]
-    costs = [r["cost"] for r in results if r["success"]]
+    succ = [r for r in results if r.get("success", False) and r.get("theta_rec") is not None]
+    theta = [r["theta_rec"] for r in succ]
+    costs = [r.get("cost", float("nan")) for r in succ]
     if len(theta) < 3:
         print("  Too few points for PCA/t-SNE")
         return
@@ -255,9 +275,10 @@ def plot_pca_tsne(data: dict, out_dir: str):
 def plot_cost_vs_clusters(data: dict, out_dir: str):
     """Scatter: cost vs n_clusters (gate A), annotated by patient ID."""
     results = data["results"]
-    costs = [r["cost"] for r in results if r["success"]]
-    n_cl = [r["gate_a"]["n_clusters"] for r in results if r["success"]]
-    pids = [r["patient_id"] for r in results if r["success"]]
+    succ = [r for r in results if r.get("success", False)]
+    costs = [r["cost"] for r in succ]
+    n_cl = [r.get("gate_a", {}).get("n_clusters", 0) for r in succ]
+    pids = [r.get("patient_id", -1) for r in succ]
     if not costs:
         return
 
@@ -282,10 +303,12 @@ def plot_error_correlation_heatmap(data: dict, out_dir: str):
     """Heatmap of Pearson correlation between parameter errors."""
     params = data["param_names"]
     results = data["results"]
-    X = np.array([r["abs_err_log"] for r in results if r["success"]])
-    if len(X) < 3:
+    errs = [r["abs_err_log"] for r in results if r.get("success", False)]
+    errs = [e for e in errs if e is not None and all(v is not None for v in e)]
+    if len(errs) < 3:
+        print("  Too few valid error vectors for correlation heatmap")
         return
-
+    X = np.array(errs)
     C = np.corrcoef(X.T)
     mask = np.triu(np.ones_like(C, dtype=bool), k=1)
 
@@ -318,9 +341,10 @@ def plot_pca_with_true(data: dict, out_dir: str):
     except ImportError:
         return
 
-    theta_r = np.array([r["theta_rec"] for r in results if r["success"]])
-    theta_t = np.array([r["theta_true"] for r in results if r["success"]])
-    costs = np.array([r["cost"] for r in results if r["success"]])
+    succ = [r for r in results if r.get("success", False) and r.get("theta_rec") is not None and r.get("theta_true") is not None]
+    theta_r = np.array([r["theta_rec"] for r in succ])
+    theta_t = np.array([r["theta_true"] for r in succ])
+    costs = np.array([r.get("cost", float("nan")) for r in succ])
     if len(theta_r) < 3:
         return
 
@@ -366,10 +390,14 @@ def plot_coefficient_variation(data: dict, out_dir: str):
     for i, pname in enumerate(params):
         ratios = []
         for r in results:
-            if not r["success"]:
+            if not r.get("success", False):
                 continue
-            ae = r["abs_err_log"][i]
-            tv = abs(r["theta_true"][i]) if r["theta_true"][i] is not None else 0
+            abs_err = r.get("abs_err_log")
+            theta_true = r.get("theta_true")
+            if abs_err is None or theta_true is None or i >= len(abs_err) or i >= len(theta_true):
+                continue
+            ae = abs_err[i]
+            tv = abs(theta_true[i]) if theta_true[i] is not None else 0
             if ae is not None and tv > 1e-10:
                 ratios.append(ae / tv)
         cv_vals.append(np.median(ratios) if ratios else 0)
@@ -392,16 +420,20 @@ def plot_coefficient_variation(data: dict, out_dir: str):
 def print_detailed_gate_table(data: dict):
     """Print per-patient gate summary."""
     results = data["results"]
-    print(f"\n{'PID':>4} {'Cost':>10} {'nClust':>6} {'GateA':>6} {'GateB':>6} {'nDom':>5} {'LjungQ':>10}")
+    headers = ["PID", "Cost", "nClust", "GateA", "GateB", "nDom", "LjungQ"]
+    print(f"{headers[0]:>4} {headers[1]:>10} {headers[2]:>6} {headers[3]:>6} {headers[4]:>6} {headers[5]:>5} {headers[6]:>10}")
     print(f"{'─'*4} {'─'*10} {'─'*6} {'─'*6} {'─'*6} {'─'*5} {'─'*10}")
     for r in results:
-        pid = r["patient_id"]
-        cost = r["cost"]
-        nc = r["gate_a"]["n_clusters"]
-        ga = "PASS" if r["gate_a"]["passed"] else "FAIL"
-        gb = "PASS" if r["gate_b"]["passed"] else "FAIL"
-        nd = r["gate_c"]["n_prior_dominated"]
-        lq = r["gate_b"]["lb_q"]
+        pid = r.get("patient_id", -1)
+        cost = r.get("cost", float("nan"))
+        gate_a = r.get("gate_a", {})
+        gate_b = r.get("gate_b", {})
+        gate_c = r.get("gate_c", {})
+        nc = gate_a.get("n_clusters", 0)
+        ga = "PASS" if gate_a.get("passed", False) else "FAIL"
+        gb = "PASS" if gate_b.get("passed", False) else "FAIL"
+        nd = gate_c.get("n_prior_dominated", 0)
+        lq = gate_b.get("lb_q", 0.0)
         print(f"{pid:>4} {cost:>10.4f} {nc:>6} {ga:>6} {gb:>6} {nd:>5} {lq:>10.1f}")
     print()
 
@@ -410,7 +442,7 @@ def print_summary_table(data: dict):
     """Print per-parameter recovery stats."""
     params = data["param_names"]
     results = data["results"]
-    n_success = sum(1 for r in results if r["success"])
+    n_success = sum(1 for r in results if r.get("success", False))
 
     print(f"\n{'=' * 90}")
     print(f"{'Parameter':<12} {'n_rec':>5} {'Mean |θ_err|':>12} {'Median |θ_err|':>14} "
@@ -560,7 +592,7 @@ def plot_residual_acf(data: dict, out_dir: str):
 
 def plot_cmaes_landscape(data: dict, out_dir: str):
     """PCA of CMA-ES restart points, colored by DBSCAN cluster."""
-    results = [r for r in data["results"] if r["success"] and "restarts" in r]
+    results = [r for r in data["results"] if r.get("success", False) and "restarts" in r]
     if not results:
         return
 
@@ -570,12 +602,13 @@ def plot_cmaes_landscape(data: dict, out_dir: str):
         return
 
     for r in results:
-        restarts = r["restarts"]
+        restarts = r.get("restarts", [])
         if len(restarts) < 3:
             continue
         X = np.array([rr["params"] for rr in restarts])
-        costs = np.array([rr["cost"] for rr in restarts])
-        labels = r["gate_a"].get("labels", [-1] * len(restarts))
+        costs = np.array([rr.get("cost", 0) for rr in restarts])
+        gate_a = r.get("gate_a", {})
+        labels = gate_a.get("labels", [-1] * len(restarts))
 
         Xc = X - X.mean(axis=0)
         pca = PCA(n_components=2)
@@ -583,7 +616,7 @@ def plot_cmaes_landscape(data: dict, out_dir: str):
         var_exp = pca.explained_variance_ratio_
 
         fig, ax = plt.subplots(figsize=(6, 5))
-        n_clusters = r["gate_a"]["n_clusters"]
+        n_clusters = gate_a.get("n_clusters", 0)
         cmap = plt.cm.tab10
         for pi in range(len(restarts)):
             lbl = labels[pi] if labels else -1

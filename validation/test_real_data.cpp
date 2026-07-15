@@ -1,20 +1,31 @@
 // =============================================================================
-// Test the identification pipeline on real patient data.
+// Real-data identification pipeline.
+//
+// Loads CGM + basal CSV data for a single patient, estimates basal glucose,
+// runs CMA-ES + LM identification, computes all three gates (A, B, C),
+// and writes per-patient JSON output (compatible with cross_validate format).
 //
 // Usage:
-//     ./test_real_data <cgm_csv> <basal_csv> [n_restarts] [cmaes_evals] [mode]
-//     mode: 'config' (default, JSON config — 25 active params, greedy-5 + 4 dormant fixed)
-//           '3'     (kp2+Vm0+p2U, legacy), '6' (+ka1+ka2+kd, legacy),
-//           '9'     (+kabs+Gb+VG, legacy)
+//   ./test_real_data --cgm patient_cgm.csv --basal patient_basal.csv \
+//                    [--json out.json] [--params-config config/...json] \
+//                    [--restarts N] [--evals N] [--lm-iters N] \
+//                    [--cmaes-lower L] [--cmaes-upper U] [--prior-std S]
 //
-// Defaults: 3 restarts, 500 evals each.
+// Ground-truth fields (theta_true, abs_err_log, ...) are set to null
+// since real data has no known ground truth.
 // =============================================================================
 
 #include <iostream>
 #include <iomanip>
+#include <fstream>
 #include <string>
-#include <cstdlib>
+#include <vector>
+#include <cmath>
 #include <algorithm>
+#include <chrono>
+#include <numeric>
+
+#include <nlohmann/json.hpp>
 
 #include <Eigen/Dense>
 
@@ -31,228 +42,380 @@
 #include "csv_reader.hpp"
 
 using namespace uva_padova;
+using json = nlohmann::json;
 
+// ---------------------------------------------------------------------------
+// Helpers: optional<T> for CLI flags (NaN sentinel for doubles)
+// ---------------------------------------------------------------------------
+static double nan_dbl() { return std::numeric_limits<double>::quiet_NaN(); }
+
+// ---------------------------------------------------------------------------
+// JSON helpers (matching cross_validate.cpp format)
+// ---------------------------------------------------------------------------
+static json eigen_to_json(const Eigen::MatrixXd& m) {
+  json j = json::array();
+  for (int i = 0; i < m.rows(); ++i) {
+    json row = json::array();
+    for (int jj = 0; jj < m.cols(); ++jj)
+      row.push_back(m(i, jj));
+    j.push_back(std::move(row));
+  }
+  return j;
+}
+
+static json vec_to_json(const std::vector<double>& v) {
+  json j = json::array();
+  for (double x : v) j.push_back(x);
+  return j;
+}
+
+static json null_or_vec(const std::vector<double>& v) {
+  return v.empty() ? json(nullptr) : vec_to_json(v);
+}
+
+// ---------------------------------------------------------------------------
+// Build per-patient JSON (subset of cross_validate's build_json_result;
+// ground-truth fields set to null for real data)
+// ---------------------------------------------------------------------------
+static json build_json_result(int pid,
+                              const IdentificationPipeline<>::Result& ires,
+                              const std::vector<ParamDescriptor>& active_desc,
+                              const Params& base_params,
+                              const IdentificationData& data,
+                              const GateAResult& ga,
+                              const GateBResult& gb,
+                              const GateCResult& gc,
+                              const std::vector<double>& cgm_residuals,
+                              double elapsed_s)
+{
+  json j;
+  j["patient_id"] = pid;
+  j["success"] = ires.success;
+  j["cost"] = ires.cost;
+  j["total_evals"] = ires.total_evals;
+  j["best_cma_cost"] = ires.best_cma_cost;
+  j["cmaes_evals"] = ires.cmaes_total_evals;
+  j["lm_evals"] = ires.total_evals - ires.cmaes_total_evals;
+  j["lm_n_iters"] = ires.lm_n_iters;
+  j["lm_converged"] = ires.lm_converged;
+  j["elapsed_s"] = elapsed_s;
+
+  // Gate A
+  j["gate_a"]["passed"] = ga.passed;
+  j["gate_a"]["n_clusters"] = ga.n_clusters;
+  {
+    json lbl = json::array();
+    for (int l : ga.labels) lbl.push_back(l);
+    j["gate_a"]["labels"] = std::move(lbl);
+  }
+
+  // Gate B
+  j["gate_b"]["passed"] = gb.passed;
+  j["gate_b"]["lb_q"] = gb.ljung_box.Q;
+  j["gate_b"]["lb_p_value"] = gb.ljung_box.p_value;
+  j["gate_b"]["lb_significant"] = gb.ljung_box.significant;
+  j["gate_b"]["lb_n_lags"] = gb.ljung_box.n_lags;
+  j["gate_b"]["regime_bias"] = gb.regime_bias_detected;
+  j["gate_b"]["description"] = gb.description;
+  {
+    json regimes = json::array();
+    for (const auto& rs : gb.regimes) {
+      json rj;
+      rj["name"] = rs.name;
+      rj["count"] = rs.count;
+      rj["mean_residual"] = rs.mean_residual;
+      rj["std_residual"] = rs.std_residual;
+      rj["mean_glucose"] = rs.mean_glucose;
+      rj["bias_mgdl"] = rs.bias_mgdl;
+      regimes.push_back(std::move(rj));
+    }
+    j["gate_b"]["regimes"] = std::move(regimes);
+  }
+
+  // Gate C
+  j["gate_c"]["n_prior_dominated"] = static_cast<int>(
+      std::count(gc.prior_dominated.begin(), gc.prior_dominated.end(), true));
+  j["gate_c"]["max_eigenvalue"] = gc.max_eigenvalue;
+  j["gate_c"]["condition_number"] = gc.condition_number;
+  {
+    json ev = json::array();
+    for (double v : gc.eigenvalues) ev.push_back(v);
+    j["gate_c"]["eigenvalues"] = std::move(ev);
+  }
+  {
+    json pl = json::array();
+    for (const auto& s : gc.param_labels) pl.push_back(s);
+    j["gate_c"]["param_labels"] = std::move(pl);
+  }
+  {
+    json pd = json::array();
+    for (bool b : gc.prior_dominated) pd.push_back(b);
+    j["gate_c"]["prior_dominated"] = std::move(pd);
+  }
+
+  // Per-parameter recovery: ground truth is unknown for real data
+  Params recovered_params;
+  if (ires.success)
+    recovered_params = ires.to_params(base_params, active_desc);
+
+  json theta_rec = json::array();
+  json rec_phys = json::array();
+  for (size_t i = 0; i < active_desc.size(); ++i) {
+    auto& name = active_desc[i].name;
+    if (ires.success) {
+      theta_rec.push_back(ires.params[i]);
+      rec_phys.push_back(param_value(recovered_params, name));
+    } else {
+      theta_rec.push_back(nullptr);
+      rec_phys.push_back(nullptr);
+    }
+  }
+  j["theta_true"] = nullptr;
+  j["theta_rec"] = std::move(theta_rec);
+  j["abs_err_log"] = nullptr;
+  j["abs_err_phys"] = nullptr;
+  j["param_true_phys"] = nullptr;
+  j["param_rec_phys"] = std::move(rec_phys);
+
+  // CMA-ES restart details
+  {
+    json rst = json::array();
+    for (const auto& rr : ires.all_restarts) {
+      json rrj;
+      rrj["cost"] = rr.cost;
+      json rp = json::array();
+      for (double v : rr.params) rp.push_back(v);
+      rrj["params"] = std::move(rp);
+      rst.push_back(std::move(rrj));
+    }
+    j["restarts"] = std::move(rst);
+  }
+
+  // Covariance matrix
+  if (ires.cov.rows() > 0 && ires.cov.cols() > 0)
+    j["cov"] = eigen_to_json(ires.cov);
+
+  // CGM residuals
+  j["cgm_residuals"] = null_or_vec(cgm_residuals);
+
+  // Input data
+  j["input"]["cgm_time"] = vec_to_json(data.cgm_time);
+  j["input"]["cgm_value"] = vec_to_json(data.cgm_value);
+  j["input"]["meal_time"] = vec_to_json(data.meal_time);
+  j["input"]["meal_cho"] = vec_to_json(data.meal_cho);
+  j["input"]["insulin_time"] = vec_to_json(data.insulin_time);
+  j["input"]["insulin_rate"] = vec_to_json(data.insulin_rate);
+  j["input"]["bolus_time"] = vec_to_json(data.bolus_time);
+  j["input"]["bolus_dose"] = vec_to_json(data.bolus_dose);
+
+  // No true_input for real data
+  j["true_input"] = nullptr;
+
+  return j;
+}
+
+// ===========================================================================
+// Usage / help
+// ===========================================================================
+static void print_help(const char* prog) {
+  std::cerr << "Usage: " << prog << " --cgm <csv> --basal <csv> [options]\n"
+            << "\n"
+            << "Required:\n"
+            << "  --cgm FILE      CGM CSV (columns: t_min, cgm_mgdl, meal_mg, bolus_pmol_kg)\n"
+            << "  --basal FILE    Basal CSV (columns: t_min, basal_u_per_hr)\n"
+            << "\n"
+            << "Output:\n"
+            << "  --json FILE     Output JSON path (default: result.json)\n"
+            << "\n"
+            << "Parameter config:\n"
+            << "  --params-config FILE  Parameter descriptor JSON (default: " UVA_PADOVA_CONFIG_DIR "/default_params.json)\n"
+            << "\n"
+            << "Optimizer:\n"
+            << "  --restarts N    CMA-ES restarts (default: 3)\n"
+            << "  --evals N       CMA-ES evaluations per restart (default: 500)\n"
+            << "  --lm-iters N    Levenberg-Marquardt max iterations (default: 100)\n"
+            << "  --cmaes-lower L CMA-ES lower bound (default: -3.0)\n"
+            << "  --cmaes-upper U CMA-ES upper bound (default: 3.0)\n"
+            << "  --prior-std S   Prior std override (default: from descriptor)\n"
+            << "\n"
+            << "Misc:\n"
+            << "  --help          Show this message\n";
+}
+
+// ===========================================================================
 int main(int argc, char* argv[]) {
-  std::cout << std::scientific << std::setprecision(6);
+  std::cout << std::fixed << std::setprecision(4);
 
-  if (argc < 3) {
-    std::cerr << "Usage: " << argv[0] << " <cgm_csv> <basal_csv> [n_restarts] [cmaes_evals] [mode]\n";
-    std::cerr << "  mode: 'config' (default, JSON — 25 active, greedy-5 + 4 dormant fixed),\n";
-    std::cerr << "        '3' (kp2+Vm0+p2U), '6' (+ka1+ka2+kd), '9' (+kabs+Gb+VG)\n";
+  if (argc < 2) { print_help(argv[0]); return 1; }
+
+  // ---- Parse CLI ----
+  std::string cgm_csv, basal_csv, json_path = "result.json";
+  std::string params_config_path;
+  int restarts = -1;
+  int evals = -1;
+  int lm_iters = -1;
+  double cmaes_lower = nan_dbl();
+  double cmaes_upper = nan_dbl();
+  double prior_std = nan_dbl();
+
+  for (int i = 1; i < argc; ++i) {
+    std::string arg = argv[i];
+    auto next = [&]() -> std::string {
+      if (++i >= argc) {
+        std::cerr << "ERROR: " << arg << " requires a value\n";
+        std::exit(1);
+      }
+      return argv[i];
+    };
+
+    if (arg == "--cgm")           cgm_csv = next();
+    else if (arg == "--basal")    basal_csv = next();
+    else if (arg == "--json")     json_path = next();
+    else if (arg == "--params-config") params_config_path = next();
+    else if (arg == "--restarts") restarts = std::stoi(next());
+    else if (arg == "--evals")    evals = std::stoi(next());
+    else if (arg == "--lm-iters") lm_iters = std::stoi(next());
+    else if (arg == "--cmaes-lower") cmaes_lower = std::stod(next());
+    else if (arg == "--cmaes-upper") cmaes_upper = std::stod(next());
+    else if (arg == "--prior-std")   prior_std = std::stod(next());
+    else if (arg == "--help")     { print_help(argv[0]); return 0; }
+    else {
+      std::cerr << "WARNING: unknown flag " << arg << ", ignoring\n";
+    }
+  }
+
+  if (cgm_csv.empty() || basal_csv.empty()) {
+    std::cerr << "ERROR: --cgm and --basal are required\n";
     return 1;
   }
 
-  std::string cgm_csv = argv[1];
-  std::string basal_csv = argv[2];
-  int n_restarts = (argc > 3) ? std::atoi(argv[3]) : 3;
-  int cmaes_evals = (argc > 4) ? std::atoi(argv[4]) : 500;
-  std::string mode = (argc > 5) ? argv[5] : "config";
+  int n_restarts = (restarts > 0) ? restarts : 3;
+  int n_evals    = (evals > 0)    ? evals    : 500;
+  int n_lm_iters = (lm_iters > 0) ? lm_iters : 100;
+  double lower   = std::isnan(cmaes_lower) ? -3.0 : cmaes_lower;
+  double upper   = std::isnan(cmaes_upper) ? 3.0  : cmaes_upper;
+  double pstd    = std::isnan(prior_std)   ? 1.0  : prior_std;
 
-  // ---- Choose params to identify ----
-  std::vector<ParamDescriptor> desc;
-  bool use_config = (mode == "config");
-  if (!use_config) {
-    if (mode == "6") {
-    desc = {
-      { "kp2",  0.0, 1.0, 0.0 },
-      { "Vm0",  0.0, 1.0, 0.0 },
-      { "p2U",  0.0, 1.0, 0.0 },
-      { "ka1",  0.0, 1.0, 0.0 },
-      { "ka2",  0.0, 1.0, 0.0 },
-      { "kd",   0.0, 1.0, 0.0 },
-    };
-  } else if (mode == "9") {
-    desc = {
-      { "kp2",  0.0, 1.0, 0.0 },
-      { "Vm0",  0.0, 1.0, 0.0 },
-      { "p2U",  0.0, 1.0, 0.0 },
-      { "ka1",  0.0, 1.0, 0.0 },
-      { "ka2",  0.0, 1.0, 0.0 },
-      { "kd",   0.0, 1.0, 0.0 },
-      { "kabs", 0.0, 1.0, 0.0 },
-      { "Gb",   0.0, 0.2, 0.0 },  // tight prior — Gb ≈ CGM median
-      { "VG",   0.0, 1.0, 0.0 },
-    };
-    } else {
-      desc = {
-        { "kp2",  0.0, 1.0, 0.0 },
-        { "Vm0",  0.0, 1.0, 0.0 },
-        { "p2U",  0.0, 1.0, 0.0 },
-      };
-    }
-  }
-  std::cout << "  Mode: ";
-  if (use_config) {
-    std::cout << "config (JSON)";
-  } else {
-    std::cout << desc.size() << " params (";
-    for (size_t i = 0; i < desc.size(); ++i)
-      std::cout << (i ? ", " : "") << desc[i].name;
-    std::cout << ")";
-  }
-  std::cout << "\n";
+  auto t_start = std::chrono::steady_clock::now();
 
+  // ---- Base parameters ----
   Params base_params = Params::defaults_t1d();
+
+  // ---- Load parameter descriptors ----
+  std::string config_path = params_config_path.empty()
+    ? UVA_PADOVA_CONFIG_DIR "/default_params.json"
+    : params_config_path;
+
+  auto all_desc = load_param_descriptors(config_path);
+  auto active_desc = active_descriptors(all_desc);
+
+  std::cout << "Config: " << config_path << "\n"
+            << "  Params: " << active_desc.size() << " active\n";
 
   // ---- Load data (first pass) to estimate Gb from CGM ----
   auto data = RealDataReader::load_from_csv(cgm_csv, basal_csv, base_params);
   if (data.cgm_time.empty()) {
-    std::cerr << "Failed to load data\n";
+    std::cerr << "ERROR: failed to load data from " << cgm_csv << "\n";
     return 1;
   }
 
-  // Estimate Gb from CGM: use median of lower half (Q2 = median)
+  std::cout << "Data: " << data.cgm_time.size() << " CGM, "
+            << data.meal_time.size() << " meals, "
+            << data.bolus_time.size() << " boluses, "
+            << data.insulin_time.size() << " basal segments\n";
+
+  // Estimate Gb from CGM median
   {
     auto sorted = data.cgm_value;
     std::sort(sorted.begin(), sorted.end());
-    double Gb_est = sorted[sorted.size() / 2];  // median
-    std::cout << "  Estimated Gb = " << Gb_est << " mg/dL (median of "
-              << sorted.size() << " CGM values)\n";
+    double Gb_est = sorted[sorted.size() / 2];
+    std::cout << "Gb: " << Gb_est << " mg/dL (CGM median)\n";
     base_params.Gb = Gb_est;
-    // Reload with adjusted Gb so steady-state and basal encoding are consistent
+    // Reload with adjusted Gb
     data = RealDataReader::load_from_csv(cgm_csv, basal_csv, base_params);
   }
 
+  // Override prior_std if specified
+  if (!std::isnan(prior_std)) {
+    for (auto& d : active_desc)
+      d.prior_std = pstd;
+  }
+
   // ---- Run pipeline ----
-  std::cout << "\n=== Identification pipeline ===\n";
+  std::cout << "=== Identification ===\n";
+  std::cout << "  Restarts: " << n_restarts
+            << "  Evals: " << n_evals
+            << "  LM iters: " << n_lm_iters
+            << "  Bounds: [" << lower << ", " << upper << "]\n";
 
-  std::vector<ParamDescriptor> full_desc;
-  auto result = use_config
-    ? IdentificationPipeline<>::run_from_config(data, base_params,
-        UVA_PADOVA_CONFIG_DIR "/default_params.json",
-        n_restarts, cmaes_evals, &full_desc)
-    : IdentificationPipeline<>::run(data, base_params, desc, n_restarts, cmaes_evals);
+  auto result = IdentificationPipeline<>::run(
+      data, base_params, active_desc,
+      n_restarts, n_evals, n_lm_iters, lower, upper);
 
-  if (!result.success) {
-    std::cerr << "Pipeline failed\n";
+  std::cout << "Result: success=" << (result.success ? "YES" : "NO")
+            << " cost=" << result.cost
+            << " evals=" << result.total_evals << "\n";
+
+  // ---- Gates ----
+  GateAResult gateA;
+  GateBResult gateB;
+  GateCResult gateC;
+  std::vector<double> cgm_residuals;
+
+  if (result.success) {
+    gateA = diagnose_multiplicity(result.all_restarts, active_desc);
+
+    {
+      ObservationCost<> obs_cost(data, base_params, active_desc);
+      gateB = diagnose_structural_adequacy(
+          data.cgm_time, data.cgm_value, data.meal_time,
+          result.params.data(), obs_cost);
+    }
+
+    {
+      ObservationCost<> obs_cost_gc(data, base_params, active_desc);
+      gateC = diagnose_observability(result.params.data(), obs_cost_gc, active_desc);
+    }
+
+    // CGM residuals
+    {
+      ObservationCost<> obs_cost_res(data, base_params, active_desc);
+      auto cgm_sim = obs_cost_res.simulate_observations<double>(result.params.data());
+      cgm_residuals.resize(data.cgm_value.size());
+      for (size_t i = 0; i < data.cgm_value.size(); ++i)
+        cgm_residuals[i] = data.cgm_value[i] - cgm_sim[i];
+    }
+  }
+
+  // ---- Console gate summary ----
+  std::cout << "Gates: A=" << (gateA.passed ? "PASS" : "FAIL")
+            << "(" << gateA.n_clusters << "cl)"
+            << " B=" << (gateB.passed ? "PASS" : "FAIL")
+            << "(" << (gateB.ljung_box.significant ? "autocorr " : "")
+            << (gateB.regime_bias_detected ? "bias" : "") << ")"
+            << " C=" << std::count(gateC.prior_dominated.begin(), gateC.prior_dominated.end(), true)
+            << " dominated\n";
+
+  // ---- Build and write JSON ----
+  auto t_end = std::chrono::steady_clock::now();
+  double elapsed_s = std::chrono::duration<double>(t_end - t_start).count();
+
+  json jout = build_json_result(0, result, active_desc, base_params, data,
+                                gateA, gateB, gateC, cgm_residuals, elapsed_s);
+
+  // Top-level metadata
+  jout["param_names"] = json::array();
+  for (auto& d : active_desc)
+    jout["param_names"].push_back(d.name);
+
+  std::ofstream jfile(json_path);
+  if (!jfile.is_open()) {
+    std::cerr << "ERROR: cannot write " << json_path << "\n";
     return 1;
   }
+  jfile << jout.dump(2) << "\n";
+  jfile.close();
 
-  const auto& active_desc = use_config ? active_descriptors(full_desc) : desc;
-
-  // ---- Print result ----
-  std::cout << "\n=== Pipeline result ===\n";
-  std::cout << "  cost=" << result.cost << "\n";
-  std::cout << "  success=" << (result.success ? "yes" : "no") << "\n";
-  std::cout << "  theta = [";
-  for (size_t i = 0; i < result.params.size(); ++i)
-    std::cout << (i ? ", " : "") << result.params[i];
-  std::cout << "]\n";
-
-  auto recovered = result.to_params(base_params, active_desc);
-  auto default_p = Params::defaults_t1d();
-
-  for (const auto& d : active_desc) {
-    double rec_val = 0.0, def_val = 0.0;
-    if (d.name == "VG")   { rec_val = recovered.VG;   def_val = default_p.VG; }
-    if (d.name == "k1")   { rec_val = recovered.k1;   def_val = default_p.k1; }
-    if (d.name == "k2")   { rec_val = recovered.k2;   def_val = default_p.k2; }
-    if (d.name == "m1")   { rec_val = recovered.m1;   def_val = default_p.m1; }
-    if (d.name == "m2")   { rec_val = recovered.m2;   def_val = default_p.m2; }
-    if (d.name == "m4")   { rec_val = recovered.m4;   def_val = default_p.m4; }
-    if (d.name == "kmax") { rec_val = recovered.kmax; def_val = default_p.kmax; }
-    if (d.name == "kmin") { rec_val = recovered.kmin; def_val = default_p.kmin; }
-    if (d.name == "kabs") { rec_val = recovered.kabs; def_val = default_p.kabs; }
-    if (d.name == "kgri") { rec_val = recovered.kgri; def_val = default_p.kgri; }
-    if (d.name == "f")    { rec_val = recovered.f;    def_val = default_p.f; }
-    if (d.name == "b")    { rec_val = recovered.b;    def_val = default_p.b; }
-    if (d.name == "d")    { rec_val = recovered.d;    def_val = default_p.d; }
-    if (d.name == "kp1")  { rec_val = recovered.kp1;  def_val = default_p.kp1; }
-    if (d.name == "kp2")  { rec_val = recovered.kp2;  def_val = default_p.kp2; }
-    if (d.name == "kp3")  { rec_val = recovered.kp3;  def_val = default_p.kp3; }
-    if (d.name == "ki")   { rec_val = recovered.ki;   def_val = default_p.ki; }
-    if (d.name == "Vm0")  { rec_val = recovered.Vm0;  def_val = default_p.Vm0; }
-    if (d.name == "Vmx")  { rec_val = recovered.Vmx;  def_val = default_p.Vmx; }
-    if (d.name == "p2U")  { rec_val = recovered.p2U;  def_val = default_p.p2U; }
-    if (d.name == "r1")   { rec_val = recovered.r1;   def_val = default_p.r1; }
-    if (d.name == "Gth")  { rec_val = recovered.Gth;  def_val = default_p.Gth; }
-    if (d.name == "ke1")  { rec_val = recovered.ke1;  def_val = default_p.ke1; }
-    if (d.name == "ke2")  { rec_val = recovered.ke2;  def_val = default_p.ke2; }
-    if (d.name == "ka1")  { rec_val = recovered.ka1;  def_val = default_p.ka1; }
-    if (d.name == "ka2")  { rec_val = recovered.ka2;  def_val = default_p.ka2; }
-    if (d.name == "kd")   { rec_val = recovered.kd;   def_val = default_p.kd; }
-    if (d.name == "Ts")   { rec_val = recovered.Ts;   def_val = default_p.Ts; }
-    if (d.name == "Gb")   { rec_val = recovered.Gb;   def_val = default_p.Gb; }
-    std::cout << "  Recovered " << d.name << " = " << rec_val
-              << " (default=" << def_val << ")\n";
-  }
-
-  // ---- Posterior cov ----
-  std::cout << "\n=== Posterior cov (from pipeline) ===\n";
-  if (result.cov.rows() > 0) {
-    auto print_corr = [&](int i, int j) {
-      double c = result.cov(i,j) / std::sqrt(result.cov(i,i) * result.cov(j,j));
-      std::cout << "  corr(" << active_desc[i].name << "," << active_desc[j].name << ")=" << c << "\n";
-    };
-    for (size_t i = 0; i < active_desc.size(); ++i)
-      for (size_t j = i+1; j < active_desc.size(); ++j)
-        print_corr(static_cast<int>(i), static_cast<int>(j));
-  } else {
-    std::cout << "  (empty)\n";
-  }
-
-  // ---- Gate (a) ----
-  {
-    auto gate_a = diagnose_multiplicity(result.all_restarts, active_desc);
-    std::cout << "\n=== Gate (a): multiplicity of minima ===\n";
-    std::cout << "  restarts=" << result.all_restarts.size()
-              << " clusters=" << gate_a.n_clusters
-              << " labels=[";
-    for (size_t i = 0; i < gate_a.labels.size(); ++i)
-      std::cout << (i ? " " : "") << gate_a.labels[i];
-    std::cout << "] passed=" << (gate_a.passed ? "yes" : "NO") << "\n";
-    if (gate_a.passed)
-      std::cout << "  ✓ Single basin of attraction\n";
-    else
-      std::cout << "  ✗ Multiple basins → personalisation BLOCKED\n";
-  }
-
-  // ---- Gate (b) ----
-  {
-    Params base_p = base_params;
-    ObservationCost<> obs_cost(data, base_p, active_desc);
-
-    auto gate_b = diagnose_structural_adequacy(
-        data.cgm_time, data.cgm_value, data.meal_time,
-        result.params.data(), obs_cost);
-
-    std::cout << "\n=== Gate (b): structural adequacy ===\n";
-    std::cout << "  Ljung-Box: Q=" << gate_b.ljung_box.Q
-              << " p=" << gate_b.ljung_box.p_value
-              << " lags=" << gate_b.ljung_box.n_lags
-              << " significant=" << (gate_b.ljung_box.significant ? "yes" : "no") << "\n";
-    for (auto& rs : gate_b.regimes) {
-      std::cout << "    " << rs.name
-                << ": n=" << rs.count
-                << " bias=" << rs.bias_mgdl << " mg/dL"
-                << " mean_glucose=" << rs.mean_glucose << "\n";
-    }
-    std::cout << "  Regime bias detected: " << (gate_b.regime_bias_detected ? "yes" : "no") << "\n";
-    if (gate_b.passed)
-      std::cout << "  ✓ No structural issues detected\n";
-    else
-      std::cout << "  " << gate_b.description << "\n";
-  }
-
-  // ---- Gate (c) ----
-  {
-    Params base_p = base_params;
-    ObservationCost<> obs_cost(data, base_p, active_desc);
-
-    auto gate_c = diagnose_observability(
-        result.params.data(), obs_cost, active_desc);
-
-    std::cout << "\n=== Gate (c): observability (SVD/FIM) ===\n";
-    std::cout << "  Eigenvalues:";
-    for (int i = 0; i < gate_c.n_params; ++i)
-      std::cout << " " << gate_c.eigenvalues[i];
-    std::cout << "\n";
-    std::cout << "  Condition number: " << gate_c.condition_number << "\n";
-    std::cout << "  Per-param labels:";
-    for (auto& lbl : gate_c.param_labels)
-      std::cout << " " << lbl;
-    std::cout << "\n";
-  }
-
+  std::cout << "Wrote " << json_path << " (" << elapsed_s << " s)\n";
   return 0;
 }

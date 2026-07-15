@@ -61,6 +61,15 @@ def precompute(results, n_params):
     d["gb_pass"] = np.array([r.get("gate_b", {}).get("passed", False) for r in results], dtype=bool)
     d["n_clusters"] = np.array([r.get("gate_a", {}).get("n_clusters", 0) for r in results], dtype=int)
     d["gc_dominated"] = np.array([r.get("gate_c", {}).get("n_prior_dominated", 0) for r in results], dtype=int)
+    # Per-parameter prior-dominated boolean matrix (N x P)
+    pd_rows = []
+    for r in results:
+        pd_list = r.get("gate_c", {}).get("prior_dominated")
+        if pd_list is None or len(pd_list) < p:
+            pd_rows.append([False] * p)
+        else:
+            pd_rows.append(pd_list[:p])
+    d["prior_dominated"] = np.array(pd_rows, dtype=bool)
     d["total_evals"] = np.array([r.get("total_evals", 0) for r in results], dtype=float)
     d["cmaes_evals"] = np.array([r.get("cmaes_evals", 0) for r in results], dtype=float)
     d["lm_evals"] = np.array([r.get("lm_evals", 0) for r in results], dtype=float)
@@ -497,6 +506,27 @@ def print_detailed_gate_table(data: dict):
     logging.info("")
 
 
+def print_prior_dominated_ranking(data: dict):
+    """Print per-parameter ranking by prior-dominated frequency (from raw/unfiltered data)."""
+    d = data.get("inclusive_df") or data["raw_df"]
+    params = data["param_names"]
+    pd_mat = d.get("prior_dominated")
+    if pd_mat is None or pd_mat.size == 0:
+        return
+    n = pd_mat.shape[0]
+
+    pct = [float(pd_mat[:, i].sum()) / n * 100 for i in range(len(params))]
+    pairs = sorted(zip(params, pct), key=lambda x: -x[1])
+
+    logging.info(f"\n{'=' * 50}")
+    logging.info(f"{'Parameter':<12} {'Dom%':>7}   {'Status'}")
+    logging.info(f"{'=' * 50}")
+    for pname, dom_pct in pairs:
+        status = "prior-dominated" if dom_pct >= 80 else "data-informed"
+        logging.info(f"{pname:<12} {dom_pct:>6.1f}%   {status}")
+    logging.info(f"{'=' * 50}\n")
+
+
 def print_summary_table(data: dict):
     """Print per-parameter recovery stats (uses filtered/analyzed results)."""
     params = data["param_names"]
@@ -505,11 +535,12 @@ def print_summary_table(data: dict):
     abs_err = df["abs_err_log"]
     ptp = df["param_true_phys"]
     prp = df["param_rec_phys"]
+    pd_mat = df.get("prior_dominated")
 
-    logging.info(f"\n{'=' * 90}")
-    logging.info(f"{'Parameter':<12} {'n_rec':>5} {'Mean |err|':>12} {'Median |err|':>14} "
+    logging.info(f"\n{'=' * 97}")
+    logging.info(f"{'Parameter':<12} {'n_rec':>5} {'Dom%':>6} {'Mean |err|':>12} {'Median |err|':>14} "
           f"{'P25':>8} {'P75':>8} {'Mean rel%':>10}")
-    logging.info(f"{'=' * 90}")
+    logging.info(f"{'=' * 97}")
 
     for i, pname in enumerate(params):
         errs = abs_err[:, i]
@@ -531,10 +562,16 @@ def print_summary_table(data: dict):
         else:
             mean_rel = float("nan")
 
-        logging.info(f"{pname:<12} {len(errs):>5} {mean_err:>12.4f} {med_err:>14.4f} "
+        # prior-dominated percentage for this parameter
+        if pd_mat is not None and pd_mat.shape[0] > 0:
+            dom_pct = float(pd_mat[:, i].sum()) / pd_mat.shape[0] * 100
+        else:
+            dom_pct = float("nan")
+
+        logging.info(f"{pname:<12} {len(errs):>5} {dom_pct:>5.1f}% {mean_err:>12.4f} {med_err:>14.4f} "
               f"{p25_val:>8.4f} {p75_val:>8.4f} {mean_rel:>9.2f}%")
 
-    logging.info(f"{'=' * 90}")
+    logging.info(f"{'=' * 97}")
     logging.info(f"\nTotal patients: {len(df['cost'])} | Successful identifications: {n_success}\n")
 
 
@@ -894,6 +931,39 @@ def plot_error_by_gate(data: dict, out_dir: str):
     logging.info(f"  Saved {out_path}")
 
 
+def plot_prior_dominated_bar(data: dict, out_dir: str):
+    """Horizontal bar chart of prior-dominated frequency per parameter."""
+    d = data.get("inclusive_df") or data["raw_df"]
+    params = data["param_names"]
+    pd_mat = d.get("prior_dominated")
+    if pd_mat is None or pd_mat.size == 0:
+        return
+    n = pd_mat.shape[0]
+    pct = [float(pd_mat[:, i].sum()) / n * 100 for i in range(len(params))]
+    pairs = sorted(zip(params, pct), key=lambda x: -x[1])
+    sorted_params = [p[0] for p in pairs]
+    sorted_pct = [p[1] for p in pairs]
+
+    fig, ax = plt.subplots(figsize=(8, 4.5))
+    colors = [plt.cm.RdYlGn_r(p / 100) for p in sorted_pct]
+    bars = ax.barh(range(len(sorted_params)), sorted_pct, color=colors, edgecolor="k", linewidth=0.5)
+    ax.set_yticks(range(len(sorted_params)))
+    ax.set_yticklabels(sorted_params, fontsize=9)
+    ax.set_xlabel("Patients where parameter is prior-dominated (%)")
+    ax.set_title(f"Prior-dominated parameter ranking (n={n})")
+    ax.set_xlim(0, 105)
+    for bar, pval in zip(bars, sorted_pct):
+        ax.text(min(pval + 2, 95), bar.get_y() + bar.get_height() / 2,
+                f"{pval:.0f}%", va="center", fontsize=8)
+    ax.grid(axis="x", alpha=0.3)
+
+    plt.tight_layout()
+    out_path = os.path.join(out_dir, "prior_dominated_bar.png")
+    fig.savefig(out_path, dpi=150, bbox_inches="tight")
+    plt.close(fig)
+    logging.info(f"  Saved {out_path}")
+
+
 PLOT_REGISTRY = {
     "true_vs_recovered": plot_true_vs_recovered,
     "error_boxplot": plot_error_boxplot,
@@ -911,6 +981,7 @@ PLOT_REGISTRY = {
     "cost_improvement": plot_cost_improvement,
     "evals_vs_accuracy": plot_evals_vs_accuracy,
     "error_by_gate": plot_error_by_gate,
+    "prior_dominated_bar": plot_prior_dominated_bar,
 }
 
 
@@ -1003,6 +1074,7 @@ def main():
 
     print_detailed_gate_table(data)
     print_summary_table(data)
+    print_prior_dominated_ranking(data)
 
 
 if __name__ == "__main__":

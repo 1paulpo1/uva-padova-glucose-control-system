@@ -28,7 +28,6 @@ import argparse
 import os
 import random
 import sys
-from pathlib import Path
 
 from parsers import discover, get_parser_for_source, BaseParser
 
@@ -96,7 +95,7 @@ def cmd_parse(args):
     if args.pid:
         patient_ids = args.pid
     else:
-        eligible = cmd_scan(args._parser)
+        eligible = cmd_scan(args)
         if not eligible:
             print("No eligible patients found")
             return

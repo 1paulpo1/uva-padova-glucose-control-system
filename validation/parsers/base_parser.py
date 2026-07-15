@@ -4,6 +4,7 @@ import csv
 import json
 import os
 from abc import ABC, abstractmethod
+from collections import defaultdict
 from dataclasses import dataclass, field
 from typing import Optional
 
@@ -58,6 +59,12 @@ class BaseParser(ABC):
                       days: int = 0) -> PatientData:
         ...
 
+    @abstractmethod
+    def check_window(self, source_path: str, patient_id: str, days: int,
+                     min_meals: int, min_boluses: int,
+                     min_cgm_points: int) -> tuple[bool, int, int, int]:
+        ...
+
     # ── Shared utilities ──────────────────────────────────────────────
 
     @staticmethod
@@ -87,9 +94,8 @@ class BaseParser(ABC):
         patients = data.get("patients")
         if patients is None:
             return None
-        result = {pid_str: p for pid_str, p in patients.items()}
-        print(f"  Loaded {len(result)} patients from cache ({cache_path})")
-        return result
+        print(f"  Loaded {len(patients)} patients from cache ({cache_path})")
+        return patients
 
     @staticmethod
     def _save_scan_cache(cache_dir: str, patients: dict,
@@ -105,7 +111,7 @@ class BaseParser(ABC):
                 json.dump(data, f, indent=2, default=str)
             os.replace(tmp, cache_path)
         except OSError:
-            pass
+            print(f"  WARN: failed to write scan cache to {cache_path}", file=sys.stderr)
 
     @staticmethod
     def report_by_study(patients: dict, output_path: str | None = None):
@@ -120,7 +126,6 @@ class BaseParser(ABC):
                 w.writeheader()
                 w.writerows(sorted_patients)
 
-        from collections import defaultdict
         by_study = defaultdict(list)
         for p in sorted_patients:
             by_study[p["source_file"]].append(p)
@@ -151,7 +156,10 @@ class BaseParser(ABC):
             return result
         with open(cgm_csv, newline="") as f:
             for row in csv.DictReader(f):
-                t = int(float(row["t_min"]))
+                try:
+                    t = int(float(row["t_min"]))
+                except (KeyError, ValueError):
+                    continue
                 cgm = float(row["cgm_mgdl"])
                 meal = float(row["meal_mg"])
                 bolus = float(row["bolus_pmol_kg"])

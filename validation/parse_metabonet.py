@@ -24,7 +24,7 @@ import argparse
 import csv
 import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime
 
 import pyarrow.compute as pc
 import pyarrow.parquet as pq

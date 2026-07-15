@@ -12,11 +12,9 @@ Default figures_dir: uva-padova-cpp/validation/figures/
 import os
 import sys
 import csv
-import math
 import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
-import matplotlib.dates as mdates
 import numpy as np
 
 # ---- Paths ----

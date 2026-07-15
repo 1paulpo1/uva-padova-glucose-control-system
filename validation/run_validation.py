@@ -17,7 +17,6 @@ import argparse
 import csv
 import json
 import os
-import re
 import subprocess
 import sys
 import time
@@ -41,193 +40,18 @@ DEFAULT_PARQUET = os.environ.get(
 
 
 # ──────────────────────────────────────────────────────────────────────────────
-# Phase 1 — stdout parsing
+# Phase 1 — run test_real_data.exe and read JSON output
 # ──────────────────────────────────────────────────────────────────────────────
-_RE_CMAES = re.compile(
-    r"CMA-ES restart (\d+)/(\d+): cost=([\d.eE+\-]+|nan) fevals=(\d+)")
-_RE_LM = re.compile(
-    r"LM: Ceres Solver Report: Iterations: (\d+), .* Termination: (.+)$")
-_RE_COST = re.compile(r"cost=(-?[\d.eE+\-]+|nan)")
-_RE_SUCCESS = re.compile(r"success=(\w+)")
-_RE_THETA = re.compile(r"theta = \[([^\]]+)\]")
-_RE_DATA = re.compile(
-    r"loaded (\d+) CGM, (\d+) meals, (\d+) boluses, (\d+) basal segments \((\d+) min\)")
-_RE_GA = re.compile(
-    r"restarts=(\d+) clusters=(\d+) labels=\[([^\]]+)\] passed=(yes|NO)")
-_RE_LJUNG = re.compile(
-    r"Ljung-Box: Q=([\d.eE+\-]+) p=([\d.eE+\-]+) lags=(\d+) significant=(yes|no)")
-_RE_BIAS = re.compile(r"Regime bias detected: (yes|no)")
-_RE_REGIME = re.compile(
-    r"\s+(Fasting|Postprandial): n=(\d+) bias=([\d.eE+\-]+) mg/dL mean_glucose=([\d.eE+\-]+)")
-_RE_FAILED = re.compile(r"FAILED: (.+)$")
-_RE_EIGEN = re.compile(r"Eigenvalues:([\d.eE+\- ]+)")
-_RE_COND = re.compile(r"Condition number: ([\d.eE+\-]+)")
-_RE_LABELS = re.compile(r"Per-param labels: (.+)$")
-_RE_RECOVERED = re.compile(
-    r"Recovered (\w+) = ([\d.eE+\-]+) \(default=([\d.eE+\-]+)\)")
-_RE_CORR = re.compile(r"corr\((\w+),(\w+)\)=([\d.eE+\-]+)")
-
-
-def parse_stdout(stdout: str) -> dict:
-    result = {}
-    lines = stdout.splitlines()
-
-    for line in lines:
-        m = _RE_DATA.search(line)
-        if m:
-            result["data_loaded"] = {
-                "cgm": int(m.group(1)),
-                "meals": int(m.group(2)),
-                "boluses": int(m.group(3)),
-                "basal_segments": int(m.group(4)),
-                "total_min": int(m.group(5)),
-            }
-            continue
-
-        m = _RE_CMAES.search(line)
-        if m:
-            result.setdefault("cmaes_restarts", []).append({
-                "restart": int(m.group(1)),
-                "total": int(m.group(2)),
-                "cost": float(m.group(3)),
-                "fevals": int(m.group(4)),
-            })
-            continue
-
-        m = _RE_LM.search(line)
-        if m:
-            result["lm"] = {
-                "iterations": int(m.group(1)),
-                "termination": m.group(2).strip(),
-            }
-            continue
-
-        m = _RE_COST.search(line)
-        if m:
-            val_str = m.group(1)
-            if val_str == "nan":
-                result["cost"] = float("nan")
-            else:
-                result["cost"] = float(val_str)
-            continue
-
-        m = _RE_SUCCESS.search(line)
-        if m:
-            result["success"] = m.group(1) == "yes"
-            continue
-
-        m = _RE_THETA.search(line)
-        if m:
-            theta_str = m.group(1).strip()
-            if "," in theta_str:
-                result["theta"] = [float(x.strip()) for x in theta_str.split(",")]
-            else:
-                result["theta"] = [float(x) for x in theta_str.split()]
-            continue
-
-        m = _RE_RECOVERED.search(line)
-        if m:
-            result.setdefault("recovered", {})[m.group(1)] = float(m.group(2))
-            continue
-
-        m = _RE_CORR.search(line)
-        if m:
-            result.setdefault("correlations", []).append({
-                "param_i": m.group(1),
-                "param_j": m.group(2),
-                "value": float(m.group(3)),
-            })
-            continue
-
-        # Gate A
-        m = _RE_GA.search(line)
-        if m:
-            result["gate_a"] = {
-                "restarts": int(m.group(1)),
-                "clusters": int(m.group(2)),
-                "labels": [int(x.strip()) for x in m.group(3).split()],
-                "passed": m.group(4) == "yes",
-            }
-            continue
-
-        # Gate B
-        m = _RE_LJUNG.search(line)
-        if m:
-            result["gate_b"] = {
-                "Q": float(m.group(1)),
-                "p_value": float(m.group(2)),
-                "lags": int(m.group(3)),
-                "significant": m.group(4) == "yes",
-            }
-            continue
-
-        m = _RE_BIAS.search(line)
-        if m:
-            if "gate_b" not in result:
-                result["gate_b"] = {}
-            result["gate_b"]["regime_bias"] = m.group(1) == "yes"
-            continue
-
-        m = _RE_REGIME.search(line)
-        if m:
-            result.setdefault("gate_b_regimes", []).append({
-                "name": m.group(1),
-                "count": int(m.group(2)),
-                "bias_mgdl": float(m.group(3)),
-                "mean_glucose": float(m.group(4)),
-            })
-            continue
-
-        m = _RE_FAILED.search(line)
-        if m:
-            if "gate_b" not in result:
-                result["gate_b"] = {}
-            result["gate_b"]["failed_description"] = m.group(1).strip()
-            if "gate_b" in result:
-                result["gate_b"]["passed"] = False
-            continue
-
-        # Gate C
-        m = _RE_EIGEN.search(line)
-        if m:
-            vals = m.group(1).strip().split()
-            result["gate_c"] = {
-                "eigenvalues": [float(v) for v in vals],
-            }
-            continue
-
-        m = _RE_COND.search(line)
-        if m:
-            if "gate_c" not in result:
-                result["gate_c"] = {}
-            result["gate_c"]["condition_number"] = float(m.group(1))
-            continue
-
-        m = _RE_LABELS.search(line)
-        if m:
-            labels = m.group(1).strip().split()
-            if "gate_c" not in result:
-                result["gate_c"] = {}
-            result["gate_c"]["param_labels"] = labels
-            continue
-
-    # Infer gate_b.passed if not explicitly set
-    if "gate_b" in result and "passed" not in result["gate_b"]:
-        has_fail = ("failed_description" in result.get("gate_b", {}))
-        # Also check Ljung-Box: if residual autocorrelation is significant, gate fails
-        gb = result["gate_b"]
-        lb_significant = gb.get("significant", False)
-        result["gate_b"]["passed"] = not has_fail and not lb_significant
-
-    return result
-
-
 def run_patient(test_real_path: str, cgm_csv: str, basal_csv: str,
-                restarts: int, evals: int, mode: str = "3",
+                json_out: str, restarts: int, evals: int,
                 timeout: int = 600) -> dict:
-    """Run test_real_data.exe on one patient and return parsed results."""
-    cmd = [test_real_path, cgm_csv, basal_csv,
-           str(restarts), str(evals), mode]
+    """Run test_real_data.exe on one patient and return parsed JSON result."""
+    cmd = [test_real_path,
+           "--cgm", cgm_csv,
+           "--basal", basal_csv,
+           "--json", json_out,
+           "--restarts", str(restarts),
+           "--evals", str(evals)]
 
     t0 = time.time()
     try:
@@ -238,25 +62,28 @@ def run_patient(test_real_path: str, cgm_csv: str, basal_csv: str,
         return {"error": f"timeout after {timeout}s"}
     except FileNotFoundError:
         return {"error": f"test_real_data not found at {test_real_path}"}
+    except KeyboardInterrupt:
+        return {"error": "interrupted"}
     except Exception as exc:
         return {"error": str(exc)}
 
     wall = time.time() - t0
-    parsed = parse_stdout(proc.stdout)
+
+    # Read JSON output
+    if os.path.exists(json_out):
+        try:
+            with open(json_out) as f:
+                parsed = json.load(f)
+        except (json.JSONDecodeError, ValueError, OSError) as exc:
+            return {"error": f"invalid JSON output: {exc}"}
+    else:
+        return {"error": f"JSON output not found at {json_out}"}
 
     parsed["exit_code"] = proc.returncode
     parsed["wall_time_s"] = round(wall, 2)
-    parsed["stdout_tail"] = proc.stdout[-2000:] if len(proc.stdout) > 2000 else proc.stdout
-
-    # Sanity checks
-    cost = parsed.get("cost")
-    if cost is not None and (cost != cost or cost < 0):
-        parsed["error"] = parsed.get("error") or f"invalid cost={cost}"
-        parsed["success"] = False
 
     if proc.returncode != 0:
-        parsed["error"] = (parsed.get("error") or
-                           f"exit code {proc.returncode}")
+        parsed["error"] = parsed.get("error") or f"exit code {proc.returncode}"
         parsed["stderr"] = proc.stderr[:1000] if proc.stderr else ""
 
     return parsed
@@ -335,8 +162,7 @@ def save_results(path: str, results: dict):
 # Dashboard
 # ──────────────────────────────────────────────────────────────────────────────
 def print_dashboard(patients_batch: list, batch_idx: int, batch_size: int,
-                    thresholds: dict, stop_reason: str | None = None,
-                    mode_label: str = "3"):
+                    thresholds: dict, stop_reason: str | None = None):
     n = len(patients_batch)
     if n == 0:
         return
@@ -363,7 +189,7 @@ def print_dashboard(patients_batch: list, batch_idx: int, batch_size: int,
 
     print()
     print(f"{'=' * 62}")
-    print(f"  Batch {batch_idx} | N={n} (requested {batch_size}) | mode={mode_label}")
+    print(f"  Batch {batch_idx} | N={n} (requested {batch_size})")
     print(f"{'=' * 62}")
     ids_str = " ".join(str(p.get("id", "?")) for p in patients_batch)
     print(f"  patients: {ids_str}")
@@ -413,8 +239,6 @@ def main():
     ap.add_argument("--output-dir", default=None)
     ap.add_argument("--test-real-data", default=None,
                     help="Path to test_real_data.exe")
-    ap.add_argument("--parse-script", default=None,
-                     help="DEPRECATED: parsing is now done in-process via parsers/ module")
     ap.add_argument("--resume", default=None,
                     help="Path to existing results JSON")
     ap.add_argument("--batch-start", type=int, default=5)
@@ -425,8 +249,6 @@ def main():
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--restarts", type=int, default=3)
     ap.add_argument("--evals", type=int, default=500)
-    ap.add_argument("--mode", default="3",
-                    help="Mode: '3' (kp2+Vm0+p2U), '6', '9', or 'config'")
     ap.add_argument("--timeout", type=int, default=600)
     ap.add_argument("--gate-a-threshold", type=float, default=0.80)
     ap.add_argument("--gate-b-threshold", type=float, default=0.80)
@@ -481,12 +303,8 @@ def main():
         processed = set()
 
     results.setdefault("meta", {})
-    mode_map = {"3": "kp2+Vm0+p2U", "6": "+ka1+ka2+kd", "9": "+kabs+Gb+VG", "config": "JSON"}
-    mode_label = mode_map.get(args.mode, args.mode)
     results["meta"].update({
         "study": args.study or "all",
-        "mode": args.mode,
-        "mode_label": mode_label,
         "restarts": args.restarts,
         "evals": args.evals,
         "days": args.days,
@@ -623,9 +441,10 @@ def main():
                 continue
 
             # Run test_real_data
+            json_out = output_dir / f"patient{pid}_{suffix}_result.json"
             print(f"  [{pid}] running test_real_data...", end=" ", flush=True)
             pr = run_patient(str(test_real_path), str(cgm_csv), str(basal_csv),
-                             args.restarts, args.evals, args.mode, args.timeout)
+                             str(json_out), args.restarts, args.evals, args.timeout)
             pr["id"] = pid
             pr["batch"] = batch_idx
             pr["cgm_density"] = cgm_density
@@ -633,6 +452,9 @@ def main():
 
             if pr.get("error"):
                 print(f"ERROR ({pr['error']})")
+                if pr["error"] == "interrupted":
+                    stop_reason = "interrupted"
+                    break
             else:
                 ga = pr.get("gate_a", {}).get("passed", False)
                 gb = pr.get("gate_b", {}).get("passed", False)
@@ -663,7 +485,7 @@ def main():
         stop_reason = stop_reason or ""
 
         print_dashboard(batch_record["patients"], batch_idx, batch_size,
-                        thresholds, stop_reason, mode_label)
+                        thresholds, stop_reason)
 
         batch_idx += 1
 
@@ -703,6 +525,37 @@ def main():
                 pr.get("wall_time_s", ""),
             ])
 
+    # ── Build analysis envelope from per-patient JSONs ──────────────────
+    analysis_results_path = output_dir / "validation_results_analysis.json"
+    param_names = None
+    envelope_results = []
+    suffix = f"{args.days}d"
+    for entry in results["batches"]:
+        pr = entry["patient"]
+        pid = pr.get("id")
+        if pid is None:
+            continue
+        json_path = output_dir / f"patient{pid}_{suffix}_result.json"
+        if json_path.exists():
+            try:
+                with open(json_path) as f:
+                    pat = json.load(f)
+            except (json.JSONDecodeError, ValueError, OSError) as exc:
+                print(f"  WARN: skipped patient {pid} in envelope (corrupt JSON: {exc})")
+                continue
+            pat["patient_id"] = pid
+            if param_names is None:
+                pn = pat.get("param_names", [])
+                if pn:
+                    param_names = pn
+            envelope_results.append(pat)
+
+    envelope = {"results": envelope_results}
+    if param_names:
+        envelope["param_names"] = param_names
+    with open(analysis_results_path, "w") as f:
+        json.dump(envelope, f, indent=2)
+
     # Print final stats
     all_pass = sum(1 for e in results["batches"]
                    if not e["patient"].get("error")
@@ -718,6 +571,7 @@ def main():
     print(f"  Batch stop reason:  {stop_reason or 'none (max reached)'}")
     print(f"  Results:            {results_path}")
     print(f"  CSV summary:        {csv_summary_path}")
+    print(f"  Analysis envelope:  {analysis_results_path} ({len(envelope_results)} patients)")
     print()
 
 

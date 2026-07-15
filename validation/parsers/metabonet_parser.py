@@ -4,6 +4,7 @@ import os
 from datetime import datetime
 from typing import Optional
 
+import pyarrow
 import pyarrow.compute as pc
 import pyarrow.parquet as pq
 
@@ -74,7 +75,7 @@ class MetabonetParser(BaseParser):
                 w_lbs = valid[0].as_py()
                 if w_lbs is not None and w_lbs > 0:
                     return (w_lbs, w_lbs * 0.453592)
-        except Exception:
+        except (OSError, pyarrow.ArrowException):
             pass
         return None
 
@@ -82,7 +83,8 @@ class MetabonetParser(BaseParser):
              limit: Optional[int] = None) -> dict[str, dict]:
         pf = pq.ParquetFile(source_path)
         n_groups = pf.metadata.num_row_groups
-        n_scan = min(n_groups, max(40, 100 // 1)) if limit is None else n_groups
+        n_scan = min(n_groups, max(40, 100)) if limit is None else n_groups
+        # Cap scan to 60 row groups to bound memory usage
         if n_scan > 60:
             n_scan = min(n_scan, 60)
 
@@ -213,7 +215,7 @@ class MetabonetParser(BaseParser):
             })
 
         df_basal = df.copy()
-        df_basal["basal"] = (df_basal["basal"] * 12.0).round(6)
+        df_basal["basal"] = (df_basal["basal"] * BASAL_SCALE).round(6)
         basal_segments_raw = _aggregate_basal(df_basal)
         basal_segments = []
         for dt, rate in basal_segments_raw:

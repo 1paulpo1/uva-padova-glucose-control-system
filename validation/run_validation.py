@@ -44,7 +44,8 @@ DEFAULT_PARQUET = os.environ.get(
 # ──────────────────────────────────────────────────────────────────────────────
 def run_patient(test_real_path: str, cgm_csv: str, basal_csv: str,
                 json_out: str, restarts: int, evals: int,
-                timeout: int = 600) -> dict:
+                timeout: int = 600, verbose: bool = False,
+                params_config: str | None = None) -> dict:
     """Run test_real_data.exe on one patient and return parsed JSON result."""
     cmd = [test_real_path,
            "--cgm", cgm_csv,
@@ -52,12 +53,32 @@ def run_patient(test_real_path: str, cgm_csv: str, basal_csv: str,
            "--json", json_out,
            "--restarts", str(restarts),
            "--evals", str(evals)]
+    if params_config:
+        cmd += ["--params-config", params_config]
 
     t0 = time.time()
+    stdout = ""
+    stderr = ""
     try:
-        proc = subprocess.run(
-            cmd, capture_output=True, text=True, timeout=timeout,
-            env=_SUBPROCESS_ENV)
+        if verbose:
+            proc = subprocess.Popen(
+                cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, bufsize=1, env=_SUBPROCESS_ENV)
+            lines = []
+            for line in iter(proc.stdout.readline, ''):
+                lines.append(line)
+                print(line, end='', flush=True)
+            proc.stdout.close()
+            ret = proc.wait(timeout=timeout)
+            stderr = proc.stderr.read()
+            proc.stderr.close()
+            stdout = ''.join(lines)
+        else:
+            proc = subprocess.run(
+                cmd, capture_output=True, text=True, timeout=timeout,
+                env=_SUBPROCESS_ENV)
+            stdout = proc.stdout
+            stderr = proc.stderr
     except subprocess.TimeoutExpired:
         return {"error": f"timeout after {timeout}s"}
     except FileNotFoundError:
@@ -84,7 +105,7 @@ def run_patient(test_real_path: str, cgm_csv: str, basal_csv: str,
 
     if proc.returncode != 0:
         parsed["error"] = parsed.get("error") or f"exit code {proc.returncode}"
-        parsed["stderr"] = proc.stderr[:1000] if proc.stderr else ""
+        parsed["stderr"] = stderr[:1000] if stderr else ""
 
     return parsed
 
@@ -249,7 +270,10 @@ def main():
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--restarts", type=int, default=3)
     ap.add_argument("--evals", type=int, default=500)
-    ap.add_argument("--timeout", type=int, default=600)
+    ap.add_argument("--timeout", type=int, default=600,
+                    help="Max seconds per patient (default: 600, 0=no limit)")
+    ap.add_argument("--params-config", default=None,
+                    help="Parameter descriptor JSON path (default: from C++ built-in)")
     ap.add_argument("--gate-a-threshold", type=float, default=0.80)
     ap.add_argument("--gate-b-threshold", type=float, default=0.80)
     ap.add_argument("--pass-rate-min", type=float, default=0.20)
@@ -261,6 +285,8 @@ def main():
                     help="Max crash fraction before early-stop (default: 0.5)")
     ap.add_argument("--min-cgm-density", type=float, default=0.5,
                     help="Min CGM density (non-zero / expected 5-min slots, default: 0.5)")
+    ap.add_argument("--verbose", action="store_true",
+                    help="Show CMA-ES/Ceres output during identification")
     args = ap.parse_args()
 
     # ── Init parser ──────────────────────────────────────────────────────
@@ -273,7 +299,7 @@ def main():
 
     # ── Resolve paths ──────────────────────────────────────────────────
     script_dir = Path(__file__).parent.resolve()
-    output_dir = Path(args.output_dir or script_dir / "output")
+    output_dir = Path(args.output_dir or script_dir / "datasets")
     output_dir.mkdir(parents=True, exist_ok=True)
 
     test_real_path = args.test_real_data or (
@@ -395,7 +421,7 @@ def main():
                 print(f"  [{pid}] generating CSV...", end=" ", flush=True)
                 try:
                     data = parser.parse_patient(pid, args.parquet, days=args.days)
-                    cgm_csv, basal_csv = BaseParser.write_csvs(data, str(output_dir))
+                    cgm_csv, basal_csv = BaseParser.write_csvs(data, str(output_dir), suffix=suffix)
                 except ValueError as e:
                     print(f"SKIP ({e})")
                     pr = {"id": pid, "batch": batch_idx, "error": f"csv_gen: {e}"}
@@ -442,9 +468,14 @@ def main():
 
             # Run test_real_data
             json_out = output_dir / f"patient{pid}_{suffix}_result.json"
-            print(f"  [{pid}] running test_real_data...", end=" ", flush=True)
+            if args.verbose:
+                print(f"-- [{pid}] test_real_data --")
+            else:
+                print(f"  [{pid}] running test_real_data...", end=" ", flush=True)
+            tout = args.timeout if args.timeout > 0 else None
             pr = run_patient(str(test_real_path), str(cgm_csv), str(basal_csv),
-                             str(json_out), args.restarts, args.evals, args.timeout)
+                             str(json_out), args.restarts, args.evals, tout,
+                             verbose=args.verbose, params_config=args.params_config)
             pr["id"] = pid
             pr["batch"] = batch_idx
             pr["cgm_density"] = cgm_density

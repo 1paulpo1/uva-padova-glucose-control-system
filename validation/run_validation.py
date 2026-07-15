@@ -21,17 +21,15 @@ import re
 import subprocess
 import sys
 import time
-from collections import defaultdict
 from datetime import datetime, timezone
 from pathlib import Path
+
+from parsers import discover, get_parser_for_source, BaseParser
 
 # MinGW-w64 DLL path — needed for test_real_data.exe
 _MINGW_BIN = r"C:\msys64\mingw64\bin"
 _SUBPROCESS_ENV = os.environ.copy()
 _SUBPROCESS_ENV["PATH"] = f"{_MINGW_BIN};{_SUBPROCESS_ENV.get('PATH', '')}"
-
-import pyarrow.compute as pc
-import pyarrow.parquet as pq
 
 # ──────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -40,171 +38,6 @@ DEFAULT_PARQUET = os.environ.get(
     "UVA_PADOVA_PARQUET",
     r"C:\Users\beleg\Downloads\metabonet_public.parquet",
 )
-AUDIT_COLS = ["id", "weight", "source_file", "carbs", "bolus", "CGM"]
-SCAN_CACHE_FILE = "patient_scan_cache.json"
-
-
-def _parquet_signature(path: str) -> dict | None:
-    """Return dict with size and mtime for cache validation."""
-    try:
-        st = os.stat(path)
-        return {"size": st.st_size, "mtime": st.st_mtime_ns}
-    except OSError:
-        return None
-
-
-def _load_scan_cache(cache_dir: str, sig: dict | None,
-                     study: str | None) -> dict | None:
-    """Load cached scan results if parquet hasn't changed."""
-    cache_path = os.path.join(cache_dir, SCAN_CACHE_FILE)
-    if not os.path.exists(cache_path) or sig is None:
-        return None
-    try:
-        with open(cache_path) as f:
-            data = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
-    # Check signature
-    stored = data.get("parquet_signature")
-    if stored is None or stored.get("size") != sig["size"] or stored.get("mtime") != sig["mtime"]:
-        return None
-    # Filter by study (study=None means all)
-    cached_study = data.get("study")
-    if cached_study != study:
-        return None
-    patients = data.get("patients")
-    if patients is None:
-        return None
-    # Keys are strings (id column in parquet), keep as-is after JSON roundtrip
-    result = {pid_str: p for pid_str, p in patients.items()}
-    print(f"  Loaded {len(result)} patients from cache ({cache_path})")
-    return result
-
-
-def _save_scan_cache(cache_dir: str, patients: dict,
-                     sig: dict | None, study: str | None):
-    """Save scan results to cache."""
-    if sig is None:
-        return
-    cache_path = os.path.join(cache_dir, SCAN_CACHE_FILE)
-    data = {
-        "parquet_signature": sig,
-        "study": study,
-        "patients": patients,
-    }
-    os.makedirs(cache_dir, exist_ok=True)
-    tmp = cache_path + ".tmp"
-    try:
-        with open(tmp, "w") as f:
-            json.dump(data, f, indent=2, default=str)
-        os.replace(tmp, cache_path)
-    except OSError:
-        pass
-
-
-# ──────────────────────────────────────────────────────────────────────────────
-# Phase 0 — scan & filter (reused from run_batch_metabonet.py)
-# ──────────────────────────────────────────────────────────────────────────────
-def scan_patients(parquet_path: str, study: str | None, limit: int | None = None):
-    pf = pq.ParquetFile(parquet_path)
-    n_groups = pf.metadata.num_row_groups
-    n_scan = min(n_groups, max(40, 100 // 1)) if limit is None else n_groups
-    if n_scan > 60:
-        n_scan = min(n_scan, 60)
-
-    patients: dict = {}
-    done = False
-    for rg_idx in range(n_scan):
-        if done:
-            break
-        t = pf.read_row_group(rg_idx, columns=AUDIT_COLS)
-        df = t.to_pandas()
-        if study is not None:
-            df = df[df["source_file"] == study]
-        if df.empty:
-            continue
-        for pid in df["id"].unique():
-            if pid in patients:
-                sub = df[df["id"] == pid]
-                p = patients[pid]
-                p["rows"] += len(sub)
-                p["meals"] += int((sub["carbs"].fillna(0) > 0).sum())
-                p["boluses"] += int((sub["bolus"].fillna(0) > 0).sum())
-                p["cgm"] += int(sub["CGM"].notna().sum())
-                continue
-            sub = df[df["id"] == pid]
-            w = sub["weight"].dropna()
-            if len(w) == 0 or w.iloc[0] <= 0:
-                continue
-            patients[pid] = {
-                "id": pid,
-                "weight_lbs": w.iloc[0],
-                "source_file": sub["source_file"].iloc[0],
-                "rows": len(sub),
-                "meals": int((sub["carbs"].fillna(0) > 0).sum()),
-                "boluses": int((sub["bolus"].fillna(0) > 0).sum()),
-                "cgm": int(sub["CGM"].notna().sum()),
-            }
-            if limit is not None and len(patients) >= limit:
-                done = True
-                break
-        if (rg_idx + 1) % 20 == 0:
-            print(f"  RG {rg_idx+1}/{n_scan}: {len(patients)} patients", flush=True)
-    return patients
-
-
-def quick_check_window(parquet_path: str, patient_id: str, n_days: int,
-                       min_meals: int, min_boluses: int,
-                       min_cgm_points: int = 50) -> tuple[bool, int, int, int]:
-    try:
-        t = pq.read_table(
-            parquet_path,
-            columns=["id", "date", "carbs", "bolus", "CGM"],
-            filters=[("id", "=", patient_id)],
-        )
-    except Exception:
-        return (False, 0, 0, 0)
-    if len(t) == 0:
-        return (False, 0, 0, 0)
-    df = t.to_pandas()
-    df["date"] = df["date"].dt.tz_localize(None)
-    df = df.sort_values("date").reset_index(drop=True)
-    ref = df["date"].iloc[0].replace(hour=0, minute=0, second=0, microsecond=0)
-    t_end = n_days * 1440
-    df["t_min"] = (df["date"] - ref).dt.total_seconds() / 60
-    window = df[(df["t_min"] >= 0) & (df["t_min"] < t_end)]
-    meals = int((window["carbs"].fillna(0) > 0).sum())
-    boluses = int((window["bolus"].fillna(0) > 0).sum())
-    cgm_count = int(window["CGM"].notna().sum())
-    return (meals >= min_meals and boluses >= min_boluses and cgm_count >= min_cgm_points,
-            meals, boluses, cgm_count)
-
-
-def check_csv_quality(cgm_csv: str, basal_csv: str) -> dict:
-    result = dict(cgm_count=0, meal_count=0, bolus_count=0,
-                  basal_segments=0, total_min=0, has_data=False,
-                  cgm_density=0.0)
-    if not os.path.exists(cgm_csv) or not os.path.exists(basal_csv):
-        return result
-    with open(cgm_csv, newline="") as f:
-        for row in csv.DictReader(f):
-            t = int(float(row["t_min"]))
-            cgm = float(row["cgm_mgdl"])
-            meal = float(row["meal_mg"])
-            bolus = float(row["bolus_pmol_kg"])
-            if cgm > 0:
-                result["cgm_count"] += 1
-            if meal > 0:
-                result["meal_count"] += 1
-            if bolus > 0:
-                result["bolus_count"] += 1
-            if t > result["total_min"]:
-                result["total_min"] = t
-    with open(basal_csv, newline="") as f:
-        result["basal_segments"] = sum(1 for _ in csv.DictReader(f))
-    result["has_data"] = result["cgm_count"] > 0 and result["basal_segments"] >= 2
-    result["cgm_density"] = result["cgm_count"] / max(1, result["total_min"] / 5)
-    return result
 
 
 # ──────────────────────────────────────────────────────────────────────────────
@@ -580,7 +413,8 @@ def main():
     ap.add_argument("--output-dir", default=None)
     ap.add_argument("--test-real-data", default=None,
                     help="Path to test_real_data.exe")
-    ap.add_argument("--parse-script", default=None)
+    ap.add_argument("--parse-script", default=None,
+                     help="DEPRECATED: parsing is now done in-process via parsers/ module")
     ap.add_argument("--resume", default=None,
                     help="Path to existing results JSON")
     ap.add_argument("--batch-start", type=int, default=5)
@@ -607,6 +441,14 @@ def main():
                     help="Min CGM density (non-zero / expected 5-min slots, default: 0.5)")
     args = ap.parse_args()
 
+    # ── Init parser ──────────────────────────────────────────────────────
+    discover()
+    parser_cls = get_parser_for_source(args.parquet)
+    if parser_cls is None:
+        print(f"Error: no parser found for {args.parquet}")
+        sys.exit(1)
+    parser = parser_cls()
+
     # ── Resolve paths ──────────────────────────────────────────────────
     script_dir = Path(__file__).parent.resolve()
     output_dir = Path(args.output_dir or script_dir / "output")
@@ -617,11 +459,6 @@ def main():
     test_real_path = Path(test_real_path)
     if not test_real_path.exists():
         print(f"Error: test_real_data not found at {test_real_path}")
-        sys.exit(1)
-
-    parse_script = args.parse_script or str(script_dir / "parse_metabonet.py")
-    if not os.path.exists(parse_script):
-        print(f"Error: parse_metabonet.py not found at {parse_script}")
         sys.exit(1)
 
     results_path = output_dir / "validation_results.json"
@@ -659,15 +496,16 @@ def main():
 
     # ── Scan patients (with cache) ─────────────────────────────────────
     print("Phase 0: scanning parquet...")
-    sig = None if args.no_cache else _parquet_signature(args.parquet)
-    all_pts = _load_scan_cache(str(output_dir), sig, args.study) if not args.no_cache else None
+    sig = None if args.no_cache else BaseParser._parquet_signature(args.parquet)
+    all_pts = (None if args.no_cache
+               else BaseParser._load_scan_cache(str(output_dir), sig, args.study))
 
     if all_pts is None:
-        all_pts = scan_patients(args.parquet, args.study)
+        all_pts = parser.scan(args.parquet, args.study)
         if not all_pts:
             print("No patients found!")
             sys.exit(1)
-        _save_scan_cache(str(output_dir), all_pts, sig, args.study)
+        BaseParser._save_scan_cache(str(output_dir), all_pts, sig, args.study)
         print(f"  Found {len(all_pts)} patients with weight")
     else:
         print(f"  Cache hit: {len(all_pts)} patients with weight")
@@ -683,7 +521,7 @@ def main():
     eligible = []
     min_cgm_points = max(1, int(args.days * 288 * args.min_cgm_density))
     for pid, w_lbs in candidates:
-        passes, meals_w, boluses_w, cgm_w = quick_check_window(
+        passes, meals_w, boluses_w, cgm_w = parser.check_window(
             args.parquet, pid, args.days, args.min_meals, args.min_boluses, min_cgm_points)
         if passes:
             eligible.append((pid, w_lbs))
@@ -730,27 +568,19 @@ def main():
               f" ({total_done}/{args.max_patients} done)")
 
         for pid, weight_lbs in batch_patients:
-            weight_kg = weight_lbs * 0.453592
             suffix = f"{args.days}d"
             cgm_csv = output_dir / f"patient{pid}_{suffix}_cgm_meals_bolus.csv"
             basal_csv = output_dir / f"patient{pid}_{suffix}_basal.csv"
 
-            # Generate CSV if needed
+            # Generate CSV if needed (in-process, no subprocess)
             if not cgm_csv.exists():
                 print(f"  [{pid}] generating CSV...", end=" ", flush=True)
-                cmd = [
-                    sys.executable, parse_script, str(pid),
-                    "--parquet", args.parquet,
-                    "--days", str(args.days),
-                    "--output-dir", str(output_dir),
-                    "--weight", f"{weight_kg:.1f}",
-                ]
-                proc = subprocess.run(
-                    cmd, capture_output=True, text=True, timeout=120)
-                if proc.returncode != 0:
-                    print(f"SKIP ({proc.stderr.strip()})")
-                    pr = {"id": pid, "batch": batch_idx,
-                          "error": f"csv_gen: {proc.stderr.strip()}"}
+                try:
+                    data = parser.parse_patient(pid, args.parquet, days=args.days)
+                    cgm_csv, basal_csv = BaseParser.write_csvs(data, str(output_dir))
+                except ValueError as e:
+                    print(f"SKIP ({e})")
+                    pr = {"id": pid, "batch": batch_idx, "error": f"csv_gen: {e}"}
                     batch_record["patients"].append(pr)
                     processed.add(pid)
                     total_done += 1
@@ -761,7 +591,7 @@ def main():
                 print("OK")
 
             # Check CSV quality
-            quality = check_csv_quality(str(cgm_csv), str(basal_csv))
+            quality = BaseParser.check_csv_quality(str(cgm_csv), str(basal_csv))
             cgm_density = quality.get("cgm_density", 0)
             if not quality["has_data"]:
                 print(f"  [{pid}] SKIP (no CGM data)")
@@ -773,7 +603,6 @@ def main():
                 results["batches"].append({"batch": batch_idx, "patient": pr})
                 results["processed_ids"] = sorted(processed)
                 save_results(str(results_path), results)
-                # Clean up useless CSVs
                 for p in [cgm_csv, basal_csv]:
                     if p.exists():
                         p.unlink()

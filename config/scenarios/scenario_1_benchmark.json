@@ -1,0 +1,43 @@
+{
+  "_description": "Scenario 1: 'Well-Compensated Benchmark'. Adult patient with consistent routine, low CGM noise, minimal meal/bolus errors. Used for optimizer verification and baseline convergence testing.",
+
+  "simulation": {
+    "duration_min": 1440,
+    "cgm_interval": 5,
+    "perturbation_std": 0.25
+  },
+
+  "body_weight_kg": 75.0,
+
+  "meal_generation": {
+    "daily_cho_g": 210,
+    "n_meals_per_day": 3,
+    "split_cv": 0.1,
+    "time_cv": 0.05
+  },
+
+  "cgm_noise": {
+    "fixed_sd": 1.5,
+    "relative_sd": 1.5,
+    "max_dropout_min": 5,
+    "dropout_prob": 0.001
+  },
+
+  "meal_errors": {
+    "skip_prob": 0.01,
+    "timing_shift_sd": 2.0,
+    "amount_noise_sd": 0.05
+  },
+
+  "insulin_errors": {
+    "bolus_skip_prob": 0.005,
+    "bolus_dose_cv": 0.05,
+    "bolus_timing_shift_sd": 1.0,
+    "basal_rate_cv": 0.05
+  },
+
+  "optimizer": {
+    "n_cmaes_restarts": 10,
+    "cmaes_evals": 800
+  }
+}

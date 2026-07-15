@@ -402,6 +402,13 @@ static void load_json_config(VirtualPatientConfig& cfg, const std::string& path)
     }
     cfg.meal_generation = mg;
   }
+
+  // Correction bolus config
+  if (auto it = j.find("correction_bolus"); it != j.end()) {
+    if (auto v = it->find("prob_per_hour"); v != it->end()) cfg.correction_bolus.prob_per_hour = v->get<double>();
+    if (auto v = it->find("dose_mean_U"); v != it->end()) cfg.correction_bolus.dose_mean_U = v->get<double>();
+    if (auto v = it->find("dose_std_U"); v != it->end()) cfg.correction_bolus.dose_std_U = v->get<double>();
+  }
 }
 
 // ===========================================================================
@@ -449,6 +456,11 @@ struct CLIConfig {
   int cgm_interval = -1;
   double perturbation_std = std::numeric_limits<double>::quiet_NaN();
 
+  // Correction bolus overrides
+  double correction_bolus_prob = std::numeric_limits<double>::quiet_NaN();
+  double correction_bolus_mean = std::numeric_limits<double>::quiet_NaN();
+  double correction_bolus_std = std::numeric_limits<double>::quiet_NaN();
+
   // Optimizer overrides
   int restarts = -1;
   int evals = -1;
@@ -487,6 +499,11 @@ static void apply_cli_overrides(VirtualPatientConfig& cfg, const CLIConfig& cli)
   if (!std::isnan(cli.time_cv))       { cfg.meal_generation.time_cv = cli.time_cv; meal_gen_set = true; }
   if (!std::isnan(cli.bolus_u_per_g)) { cfg.meal_generation.bolus_u_per_g = cli.bolus_u_per_g; meal_gen_set = true; }
   if (meal_gen_set) cfg.meal_generation.enabled = true;
+
+  // Correction bolus
+  if (!std::isnan(cli.correction_bolus_prob)) cfg.correction_bolus.prob_per_hour = cli.correction_bolus_prob;
+  if (!std::isnan(cli.correction_bolus_mean)) cfg.correction_bolus.dose_mean_U = cli.correction_bolus_mean;
+  if (!std::isnan(cli.correction_bolus_std))  cfg.correction_bolus.dose_std_U = cli.correction_bolus_std;
 }
 
 // ===========================================================================
@@ -541,7 +558,11 @@ static void print_help(const char* prog) {
              << "  --n-meals-std-day F      Day-level std for meal count\n"
              << "  --split-cv F           LogNormal CV for CHO split (0=equal, default: 0.3)\n"
              << "  --time-cv F            LogNormal CV for meal time jitter (0=fixed, default: 0.12)\n"
-             << "  --bolus-u-per-g F      Insulin units per gram CHO (default: 0.1)\n";
+             << "  --bolus-u-per-g F      Insulin units per gram CHO (default: 0.1)\n\n"
+             << "Correction boluses (insulin without meals, Poisson process):\n"
+             << "  --correction-bolus-prob F  Poisson rate [events/hour] (default: 0 = disabled)\n"
+             << "  --correction-bolus-mean F  Mean dose [U] (default: 1.0)\n"
+             << "  --correction-bolus-std F   Std dev of dose [U] (default: 0.5)\n";
 }
 
 // ===========================================================================
@@ -600,6 +621,9 @@ int main(int argc, char** argv) {
     else if (arg == "--split-cv") cli.split_cv = std::stod(next());
     else if (arg == "--time-cv") cli.time_cv = std::stod(next());
     else if (arg == "--bolus-u-per-g") cli.bolus_u_per_g = std::stod(next());
+    else if (arg == "--correction-bolus-prob") cli.correction_bolus_prob = std::stod(next());
+    else if (arg == "--correction-bolus-mean") cli.correction_bolus_mean = std::stod(next());
+    else if (arg == "--correction-bolus-std")  cli.correction_bolus_std = std::stod(next());
     else if (arg == "--help") { print_help(argv[0]); return 0; }
     else if (arg.find("--") == 0) {
       std::cerr << "WARNING: unknown flag " << arg << ", ignoring\n";
@@ -905,6 +929,12 @@ int main(int argc, char** argv) {
     for (double t : cfg.meal_generation.meal_times)
       mt.push_back(t);
     jout["config"]["meal_generation"]["meal_times"] = std::move(mt);
+  }
+
+  if (cfg.correction_bolus.prob_per_hour > 0.0) {
+    jout["config"]["correction_bolus"]["prob_per_hour"] = cfg.correction_bolus.prob_per_hour;
+    jout["config"]["correction_bolus"]["dose_mean_U"] = cfg.correction_bolus.dose_mean_U;
+    jout["config"]["correction_bolus"]["dose_std_U"] = cfg.correction_bolus.dose_std_U;
   }
 
   jout["summary"]["n_success"] = n_success;

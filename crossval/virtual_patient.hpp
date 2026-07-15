@@ -56,6 +56,15 @@ struct MealGenerationConfig {
 };
 
 // ---------------------------------------------------------------------------
+// Correction bolus configuration (insulin without meals)
+// ---------------------------------------------------------------------------
+struct CorrectionBolusConfig {
+  double prob_per_hour{0.0};   // Poisson rate λ [events/hour] (0 = disabled)
+  double dose_mean_U{1.0};     // mean dose [units]
+  double dose_std_U{0.5};      // std dev of dose [units]
+};
+
+// ---------------------------------------------------------------------------
 // Configuration for the cross-validation experiment
 // ---------------------------------------------------------------------------
 struct VirtualPatientConfig {
@@ -71,6 +80,7 @@ struct VirtualPatientConfig {
   InsulinErrorConfig insulin_errors;
   MealErrorConfig meal_errors;
   MealGenerationConfig meal_generation;
+  CorrectionBolusConfig correction_bolus;
 
   double body_weight_kg{75.0};   // default body weight [kg], used for bolus_u→pmol/kg
 

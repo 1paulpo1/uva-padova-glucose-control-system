@@ -1,0 +1,43 @@
+{
+  "_description": "Scenario 4: 'Elderly / Brittle Diabetes'. Reduced CHO intake (160 g/d), high fixed CGM noise (age-related interstitial changes), delayed bolus administration, low basal variability, wide parameter uncertainty.",
+
+  "simulation": {
+    "duration_min": 1440,
+    "cgm_interval": 5,
+    "perturbation_std": 0.5
+  },
+
+  "body_weight_kg": 70.0,
+
+  "meal_generation": {
+    "daily_cho_g": 160,
+    "n_meals_per_day": 3,
+    "split_cv": 0.2,
+    "time_cv": 0.08
+  },
+
+  "cgm_noise": {
+    "fixed_sd": 8.0,
+    "relative_sd": 2.5,
+    "max_dropout_min": 15,
+    "dropout_prob": 0.003
+  },
+
+  "meal_errors": {
+    "skip_prob": 0.02,
+    "timing_shift_sd": 5.0,
+    "amount_noise_sd": 0.15
+  },
+
+  "insulin_errors": {
+    "bolus_skip_prob": 0.06,
+    "bolus_dose_cv": 0.1,
+    "bolus_timing_shift_sd": 8.0,
+    "basal_rate_cv": 0.08
+  },
+
+  "optimizer": {
+    "n_cmaes_restarts": 12,
+    "cmaes_evals": 2000
+  }
+}

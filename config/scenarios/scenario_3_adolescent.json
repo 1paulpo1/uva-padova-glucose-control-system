@@ -1,0 +1,43 @@
+{
+  "_description": "Scenario 3: 'High-Risk Adolescent'. Erratic eating, frequent bolus omissions (forgets to inject), large CHO estimation errors, CGM dropouts (sensor detachment), dawn phenomenon. High parameter heterogeneity.",
+
+  "simulation": {
+    "duration_min": 1440,
+    "cgm_interval": 5,
+    "perturbation_std": 0.45
+  },
+
+  "body_weight_kg": 55.0,
+
+  "meal_generation": {
+    "daily_cho_g": 280,
+    "n_meals_per_day": 4,
+    "split_cv": 0.5,
+    "time_cv": 0.25
+  },
+
+  "cgm_noise": {
+    "fixed_sd": 4.0,
+    "relative_sd": 8.0,
+    "max_dropout_min": 20,
+    "dropout_prob": 0.025
+  },
+
+  "meal_errors": {
+    "skip_prob": 0.12,
+    "timing_shift_sd": 12.0,
+    "amount_noise_sd": 0.35
+  },
+
+  "insulin_errors": {
+    "bolus_skip_prob": 0.25,
+    "bolus_dose_cv": 0.3,
+    "bolus_timing_shift_sd": 12.0,
+    "basal_rate_cv": 0.3
+  },
+
+  "optimizer": {
+    "n_cmaes_restarts": 15,
+    "cmaes_evals": 1500
+  }
+}

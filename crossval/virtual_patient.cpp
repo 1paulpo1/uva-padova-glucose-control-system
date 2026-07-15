@@ -191,6 +191,34 @@ VirtualPatientResult generate_virtual_patient(
     }
   }
 
+  // ---- 7. Correction boluses (insulin without meals) ----
+  const auto& cb = config.correction_bolus;
+  if (cb.prob_per_hour > 0.0) {
+    std::mt19937 cb_rng(config.seed + patient_id * 100000 + 5678);
+
+    double duration_hours = config.duration_min / 60.0;
+    std::poisson_distribution<int> n_correction_dist(cb.prob_per_hour * duration_hours);
+    int n_correction = n_correction_dist(cb_rng);
+
+    if (n_correction > 0) {
+      std::gamma_distribution<double> dose_dist(
+          (cb.dose_mean_U * cb.dose_mean_U) / (cb.dose_std_U * cb.dose_std_U),
+          (cb.dose_std_U * cb.dose_std_U) / cb.dose_mean_U);
+      std::uniform_real_distribution<double> time_dist(0.0, static_cast<double>(config.duration_min));
+
+      for (int i = 0; i < n_correction; ++i) {
+        int t_min = static_cast<int>(std::round(time_dist(cb_rng)));
+        double dose_U = dose_dist(cb_rng);
+        double dose_pmol_kg = dose_U
+            * constants::kInsulinUnits_To_Pmol / config.body_weight_kg;
+        true_boluses.emplace_back(t_min, dose_pmol_kg);
+      }
+
+      std::sort(true_boluses.begin(), true_boluses.end(),
+          [](const BolusEvent& a, const BolusEvent& b) { return a.t_min < b.t_min; });
+    }
+  }
+
   // ---- 8. Generate synthetic data via shared generator ----
   // The generator handles: forward simulation (via simulate_observations),
   // heteroskedastic CGM noise, dropouts, meal errors, and building both

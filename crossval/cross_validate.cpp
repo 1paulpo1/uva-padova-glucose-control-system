@@ -389,6 +389,9 @@ static void load_json_config(VirtualPatientConfig& cfg, const std::string& path)
     mg.enabled = true;
     if (auto v = it->find("daily_cho_g"); v != it->end()) mg.daily_cho_g = v->get<double>();
     if (auto v = it->find("n_meals_per_day"); v != it->end()) mg.n_meals_per_day = v->get<int>();
+    if (auto v = it->find("n_meals_mean"); v != it->end()) mg.n_meals_mean = v->get<double>();
+    if (auto v = it->find("n_meals_std_patient"); v != it->end()) mg.n_meals_std_patient = v->get<double>();
+    if (auto v = it->find("n_meals_std_day"); v != it->end()) mg.n_meals_std_day = v->get<double>();
     if (auto v = it->find("split_cv"); v != it->end()) mg.split_cv = v->get<double>();
     if (auto v = it->find("time_cv"); v != it->end()) mg.time_cv = v->get<double>();
     if (auto v = it->find("bolus_u_per_g"); v != it->end()) mg.bolus_u_per_g = v->get<double>();
@@ -434,6 +437,9 @@ struct CLIConfig {
   // Meal generation overrides (any flag set → enables generative mode)
   double daily_cho_g = std::numeric_limits<double>::quiet_NaN();
   int n_meals_per_day = -1;
+  double n_meals_mean = std::numeric_limits<double>::quiet_NaN();
+  double n_meals_std_patient = std::numeric_limits<double>::quiet_NaN();
+  double n_meals_std_day = std::numeric_limits<double>::quiet_NaN();
   double split_cv = std::numeric_limits<double>::quiet_NaN();
   double time_cv = std::numeric_limits<double>::quiet_NaN();
   double bolus_u_per_g = std::numeric_limits<double>::quiet_NaN();
@@ -474,6 +480,9 @@ static void apply_cli_overrides(VirtualPatientConfig& cfg, const CLIConfig& cli)
   bool meal_gen_set = false;
   if (!std::isnan(cli.daily_cho_g))   { cfg.meal_generation.daily_cho_g = cli.daily_cho_g; meal_gen_set = true; }
   if (cli.n_meals_per_day > 0)        { cfg.meal_generation.n_meals_per_day = cli.n_meals_per_day; meal_gen_set = true; }
+  if (!std::isnan(cli.n_meals_mean))  { cfg.meal_generation.n_meals_mean = cli.n_meals_mean; meal_gen_set = true; }
+  if (!std::isnan(cli.n_meals_std_patient)) { cfg.meal_generation.n_meals_std_patient = cli.n_meals_std_patient; meal_gen_set = true; }
+  if (!std::isnan(cli.n_meals_std_day))     { cfg.meal_generation.n_meals_std_day = cli.n_meals_std_day; meal_gen_set = true; }
   if (!std::isnan(cli.split_cv))      { cfg.meal_generation.split_cv = cli.split_cv; meal_gen_set = true; }
   if (!std::isnan(cli.time_cv))       { cfg.meal_generation.time_cv = cli.time_cv; meal_gen_set = true; }
   if (!std::isnan(cli.bolus_u_per_g)) { cfg.meal_generation.bolus_u_per_g = cli.bolus_u_per_g; meal_gen_set = true; }
@@ -513,7 +522,7 @@ static void print_help(const char* prog) {
             << "  --bolus-timing-shift F  Std dev of bolus timing error [min] (default: varies)\n"
             << "  --basal-rate-cv F       LogNormal CV for basal rate error (default: varies)\n\n"
             << "Simulation overrides:\n"
-            << "  --duration-min N     Simulation length [min] (default: 4320)\n"
+            << "  --duration-min N     Simulation leng CGMth [min] (default: 4320)\n"
             << "  --cgm-interval N     CGM sampling interval [min] (default: 5)\n"
             << "  --perturbation-std F Std dev of true θ in log-space (default: 0.3)\n\n"
             << "Optimizer overrides:\n"
@@ -524,11 +533,15 @@ static void print_help(const char* prog) {
             << "  --cmaes-upper F      CMA-ES upper bound in log-space (default: 3)\n"
              << "  --prior-std F        Prior std for all active params (default: from config)\n\n"
              << "Meal generation (enabled if any flag is set):\n"
-             << "  --daily-cho-g F    Total daily CHO in grams (default: 210)\n"
-             << "  --n-meals N        Number of meals per day (default: 3)\n"
-             << "  --split-cv F       LogNormal CV for CHO split (0=equal, default: 0.3)\n"
-             << "  --time-cv F        LogNormal CV for meal time jitter (0=fixed, default: 0.12)\n"
-             << "  --bolus-u-per-g F  Insulin units per gram CHO (default: 0.1)\n";
+             << "  --daily-cho-g F        Total daily CHO in grams (default: 210)\n"
+             << "  --n-meals N            Number of meals per day (default: 3)\n"
+             << "  --n-meals-mean F       Mean of discrete meal count distribution\n"
+             << "                         (overrides --n-meals when > 0)\n"
+             << "  --n-meals-std-patient F  Patient-level std for meal count\n"
+             << "  --n-meals-std-day F      Day-level std for meal count\n"
+             << "  --split-cv F           LogNormal CV for CHO split (0=equal, default: 0.3)\n"
+             << "  --time-cv F            LogNormal CV for meal time jitter (0=fixed, default: 0.12)\n"
+             << "  --bolus-u-per-g F      Insulin units per gram CHO (default: 0.1)\n";
 }
 
 // ===========================================================================
@@ -581,6 +594,9 @@ int main(int argc, char** argv) {
     else if (arg == "--prior-std") cli.prior_std = std::stod(next());
     else if (arg == "--daily-cho-g") cli.daily_cho_g = std::stod(next());
     else if (arg == "--n-meals") cli.n_meals_per_day = std::stoi(next());
+    else if (arg == "--n-meals-mean") cli.n_meals_mean = std::stod(next());
+    else if (arg == "--n-meals-std-patient") cli.n_meals_std_patient = std::stod(next());
+    else if (arg == "--n-meals-std-day") cli.n_meals_std_day = std::stod(next());
     else if (arg == "--split-cv") cli.split_cv = std::stod(next());
     else if (arg == "--time-cv") cli.time_cv = std::stod(next());
     else if (arg == "--bolus-u-per-g") cli.bolus_u_per_g = std::stod(next());
@@ -641,7 +657,11 @@ int main(int argc, char** argv) {
             << "  CMAES bounds:   [" << cmaes_lower << ", " << cmaes_upper << "]\n"
              << "  Prior std:      " << prior_std << "\n"
              << "  Meal gen:       " << (cfg.meal_generation.enabled ?
-                 std::to_string(cfg.meal_generation.n_meals_per_day) + " meals, " +
+                 (cfg.meal_generation.n_meals_mean > 0.0 ?
+                   "distrib(μ=" + std::to_string(cfg.meal_generation.n_meals_mean) +
+                   ",σ_p=" + std::to_string(cfg.meal_generation.n_meals_std_patient) +
+                   ",σ_d=" + std::to_string(cfg.meal_generation.n_meals_std_day) + "), " :
+                   std::to_string(cfg.meal_generation.n_meals_per_day) + " meals, ") +
                  std::to_string(cfg.meal_generation.daily_cho_g) + "g/d, split_CV=" +
                  std::to_string(cfg.meal_generation.split_cv) + ", time_CV=" +
                   std::to_string(cfg.meal_generation.time_cv) : "disabled (daily_meals)") << "\n"
@@ -870,6 +890,22 @@ int main(int argc, char** argv) {
   jout["config"]["optimizer"]["cmaes_lower"] = cmaes_lower;
   jout["config"]["optimizer"]["cmaes_upper"] = cmaes_upper;
   jout["config"]["optimizer"]["prior_std"] = prior_std;
+
+  if (cfg.meal_generation.enabled) {
+    jout["config"]["meal_generation"]["enabled"] = true;
+    jout["config"]["meal_generation"]["daily_cho_g"] = cfg.meal_generation.daily_cho_g;
+    jout["config"]["meal_generation"]["n_meals_per_day"] = cfg.meal_generation.n_meals_per_day;
+    jout["config"]["meal_generation"]["n_meals_mean"] = cfg.meal_generation.n_meals_mean;
+    jout["config"]["meal_generation"]["n_meals_std_patient"] = cfg.meal_generation.n_meals_std_patient;
+    jout["config"]["meal_generation"]["n_meals_std_day"] = cfg.meal_generation.n_meals_std_day;
+    jout["config"]["meal_generation"]["split_cv"] = cfg.meal_generation.split_cv;
+    jout["config"]["meal_generation"]["time_cv"] = cfg.meal_generation.time_cv;
+    jout["config"]["meal_generation"]["bolus_u_per_g"] = cfg.meal_generation.bolus_u_per_g;
+    json mt = json::array();
+    for (double t : cfg.meal_generation.meal_times)
+      mt.push_back(t);
+    jout["config"]["meal_generation"]["meal_times"] = std::move(mt);
+  }
 
   jout["summary"]["n_success"] = n_success;
   jout["summary"]["n_gateA_passed"] = n_gateA_passed;

@@ -12,6 +12,24 @@ namespace uva_padova {
 namespace crossval {
 
 // ---------------------------------------------------------------------------
+// Convert (target_mean, target_stddev) → (n_trials, p) for binomial_distribution
+// such that Binomial(n, p) has mean ≈ target_mean and std ≈ target_stddev.
+// ---------------------------------------------------------------------------
+static std::pair<int, double> binomial_params_from_mean_std(double mean, double stddev) {
+  if (stddev <= 0.0) {
+    return {static_cast<int>(std::round(mean)), 1.0};
+  }
+  double var = stddev * stddev;
+  double max_var = mean * 0.999;
+  double eff_var = (var < max_var) ? var : max_var;
+  double p = 1.0 - eff_var / mean;
+  p = std::clamp(p, 0.001, 0.999);
+  int n = static_cast<int>(std::round(mean / p));
+  n = std::max(n, static_cast<int>(std::round(mean)));
+  return {n, p};
+}
+
+// ---------------------------------------------------------------------------
 // Apply log-space theta vector to base params, producing true params
 // ---------------------------------------------------------------------------
 Params apply_theta_to_params(
@@ -87,15 +105,14 @@ VirtualPatientResult generate_virtual_patient(
     // ---- Generative meal schedule: different every day ----
     const auto& mg = config.meal_generation;
 
-    // Base meal times: from config or auto-spaced 360..1260
-    std::vector<double> base_times = mg.meal_times;
-    if (base_times.empty() && mg.n_meals_per_day > 0) {
-      if (mg.n_meals_per_day == 1) {
-        base_times.push_back(720.0);
-      } else {
-        for (int i = 0; i < mg.n_meals_per_day; ++i)
-          base_times.push_back(360.0 + i * 900.0 / (mg.n_meals_per_day - 1));
-      }
+    // ---- Level 1: Per-patient base meal count ----
+    int patient_base_n = mg.n_meals_per_day;
+    if (mg.n_meals_mean > 0.0) {
+      auto [n_p, p_p] = binomial_params_from_mean_std(
+          mg.n_meals_mean, mg.n_meals_std_patient);
+      std::mt19937 patient_rng(config.seed + patient_id * 100000 + 1234);
+      std::binomial_distribution<int> patient_dist(n_p, p_p);
+      patient_base_n = std::max(1, patient_dist(patient_rng));
     }
 
     for (int day = 0; day < n_days; ++day) {
@@ -106,7 +123,27 @@ VirtualPatientResult generate_virtual_patient(
       std::lognormal_distribution<double> ln_cho(0.0, mg.split_cv);
       std::lognormal_distribution<double> ln_time(0.0, mg.time_cv);
 
-      int n = mg.n_meals_per_day;
+      // ---- Level 2: Per-day meal count ----
+      int n = patient_base_n;
+      if (mg.n_meals_mean > 0.0 && mg.n_meals_std_day > 0.0) {
+        auto [n_d, p_d] = binomial_params_from_mean_std(
+            static_cast<double>(patient_base_n), mg.n_meals_std_day);
+        std::binomial_distribution<int> day_dist(n_d, p_d);
+        n = std::max(1, day_dist(day_rng));
+      }
+
+      // Base meal times: from config or auto-spaced 360..1260
+      std::vector<double> base_times = mg.meal_times;
+      if (base_times.empty() && n > 0) {
+        if (n == 1) {
+          base_times.push_back(720.0);
+        } else {
+          for (int i = 0; i < n; ++i)
+            base_times.push_back(360.0 + i * 900.0 / (n - 1));
+        }
+      }
+
+      if (n == 0) continue;
 
       // Raw CHO fractions
       std::vector<double> raw(n);

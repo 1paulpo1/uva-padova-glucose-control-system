@@ -44,7 +44,10 @@ struct MealErrorConfig {
 // ---------------------------------------------------------------------------
 struct MealGenerationConfig {
   double daily_cho_g{210.0};    // total CHO per day [g]
-  int n_meals_per_day{3};       // number of meals per day
+  int n_meals_per_day{3};       // number of meals per day (used when n_meals_mean == 0)
+  double n_meals_mean{0.0};     // mean of discrete meal count distribution (0 = use n_meals_per_day)
+  double n_meals_std_patient{0.0}; // patient-level std for meal count
+  double n_meals_std_day{0.0};  // day-level std for meal count
   double split_cv{0.3};         // LogNormal CV for CHO split across meals
   double time_cv{0.12};         // LogNormal CV for meal time jitter (0 = fixed)
   std::vector<double> meal_times; // base time of each meal [min]; empty = auto-spaced

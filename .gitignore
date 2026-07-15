@@ -20,8 +20,9 @@ CMakeFiles/
 
 # Validation output (generated)
 crossval/output/
+crossval/[0-9]*-*/
 crossval_results_*.csv
-*.png
+crossval_results_*.json
 
 # Python
 __pycache__/

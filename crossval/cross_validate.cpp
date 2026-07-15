@@ -417,7 +417,7 @@ static void load_json_config(VirtualPatientConfig& cfg, const std::string& path)
 struct CLIConfig {
   int n_patients = 20;
   int base_seed = 42;
-  bool verbose = false;
+  bool verbose = true;
   std::string csv_path = "crossval_results.csv";
   std::string json_path = "crossval_results.json";
   std::string config_path;

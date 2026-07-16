@@ -33,7 +33,8 @@ validation/datasets/ShanghaiT1DM/
 validation/datasets/T1D-UOM/
 validation/datasets/metabonet/
 validation/datasets/patient_scan_cache.json
-validation/figures/
+validation/figures/*
+!validation/figures/*.py
 validation/datasets/*.xml
 
 

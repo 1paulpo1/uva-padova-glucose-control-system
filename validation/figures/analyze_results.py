@@ -4,7 +4,7 @@ Analyze validation results from test_real_data.exe JSON output.
 
 Re-exports all ground-truth-free plot functions from crossval/analyze_results.py.
 Usage:
-    python validation/analyze_results.py --json output/validation_results_analysis.json
+    python -m figures.analyze_results --json output/validation_results_analysis.json
 """
 
 import argparse
@@ -14,7 +14,7 @@ import sys
 from pathlib import Path
 
 # Re-export all reusable functions from crossval
-_crossval = Path(__file__).resolve().parent.parent / "crossval"
+_crossval = Path(__file__).resolve().parent.parent.parent / "crossval"
 if str(_crossval) not in sys.path:
     sys.path.insert(0, str(_crossval))
 
@@ -59,8 +59,8 @@ def main():
     args = ap.parse_args()
 
     # Resolve JSON path
-    script_dir = Path(__file__).parent.resolve()
-    output_dir = Path(args.out or script_dir / "datasets")
+    script_dir = Path(__file__).resolve().parent  # validation/figures/
+    output_dir = Path(args.out or script_dir.parent / "datasets")
     json_path = args.json or str(output_dir / "validation_results_analysis.json")
 
     if not os.path.exists(json_path):

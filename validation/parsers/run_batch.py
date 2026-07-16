@@ -3,9 +3,9 @@
 Batch validation: parse patient data from parquet/CSV sources into pipeline format.
 
 Usage:
-    python validation/run_batch.py scan --source <path> [--study Loop] [--report-only]
-    python validation/run_batch.py parse --source <path> --days 7 [--study Loop]
-    python validation/run_batch.py check --cgm-csv <path> --basal-csv <path>
+    python -m parsers.run_batch scan --source <path> [--study Loop] [--report-only]
+    python -m parsers.run_batch parse --source <path> --days 7 [--study Loop]
+    python -m parsers.run_batch check --cgm-csv <path> --basal-csv <path>
 
 Subcommands:
   scan      Scan a dataset and report available patients
@@ -13,13 +13,13 @@ Subcommands:
   check     Check quality of already-generated CSVs
 
 Examples:
-    python validation/run_batch.py scan --source data.parquet --report-only
-    python validation/run_batch.py scan --source data.parquet --study Loop
-    python validation/run_batch.py parse --source data.parquet --days 7 \\
+    python -m parsers.run_batch scan --source data.parquet --report-only
+    python -m parsers.run_batch scan --source data.parquet --study Loop
+    python -m parsers.run_batch parse --source data.parquet --days 7 \\
         --min-meals 5 --min-boluses 5 --n-patients 20
-    python validation/run_batch.py parse --source data.parquet \\
+    python -m parsers.run_batch parse --source data.parquet \\
         --pid 559 --pid 563
-    python validation/run_batch.py check \\
+    python -m parsers.run_batch check \\
         --cgm-csv output/patient559_7d_cgm_meals_bolus.csv \\
         --basal-csv output/patient559_7d_basal.csv
 """
@@ -29,7 +29,8 @@ import os
 import random
 import sys
 
-from parsers import discover, get_parser_for_source, BaseParser
+from . import discover, get_parser_for_source
+from .base_parser import BaseParser
 
 
 def _resolve_parser(source: str) -> BaseParser:
@@ -49,7 +50,9 @@ def cmd_scan(args):
         print(f"  Filtering study: {args.study}")
 
     sig = None if args.no_cache else BaseParser._parquet_signature(args.source)
-    output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "datasets")
+    # validation/ (two levels up from this file inside parsers/)
+    script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = args.output_dir or os.path.join(script_dir, "datasets")
     patients = (None if args.no_cache
                 else BaseParser._load_scan_cache(output_dir, sig, args.study))
 
@@ -61,7 +64,7 @@ def cmd_scan(args):
         BaseParser._save_scan_cache(output_dir, patients, sig, args.study)
         print(f"  Found {len(patients)} patients with weight")
     else:
-        print(f"  Cache hit: {len(patients)} patients with weight")
+        print(f"  Cache hit: {len(patients)} patients")
 
     if args.report_only:
         out_path = None
@@ -105,7 +108,8 @@ def cmd_parse(args):
         eligible = eligible[:n]
         patient_ids = [pid for pid, _ in eligible]
 
-    output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "datasets")
+    script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    output_dir = args.output_dir or os.path.join(script_dir, "datasets")
 
     print(f"\nProcessing {len(patient_ids)} patients, {args.days} days each\n")
     results = []
@@ -188,7 +192,7 @@ def main():
     p_check.set_defaults(func=cmd_check)
 
     args = ap.parse_args()
-    args._parser = ap  # pass parser to subcommands for --help
+    args._parser = ap
     args.func(args)
 
 

@@ -5,9 +5,9 @@ Parse ALL patients from parquet, filter by quality, group by study.
 Output: validation/datasets/<study_name>/patient{id}_{ndays}d_*.csv
 
 Usage:
-    python validation/parse_all.py
-    python validation/parse_all.py --parquet <path> --out validation/datasets/
-    python validation/parse_all.py --days 7 --limit 100 --no-cache
+    python -m parsers.parse_all
+    python -m parsers.parse_all --parquet <path> --out validation/datasets/
+    python -m parsers.parse_all --days 7 --limit 100 --no-cache
 """
 
 import argparse
@@ -19,7 +19,8 @@ from collections import defaultdict
 
 import pyarrow
 
-from parsers import discover, get_parser_for_source, BaseParser
+from . import discover, get_parser_for_source
+from .base_parser import BaseParser
 
 DEFAULT_PARQUET = os.environ.get(
     "UVA_PADOVA_PARQUET",
@@ -44,7 +45,8 @@ def main():
                     help="Max patients to process (0 = all)")
     args = ap.parse_args()
 
-    script_dir = os.path.dirname(os.path.abspath(__file__))
+    # validation/ (two levels up from this file inside parsers/)
+    script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     output_dir = args.out or os.path.join(script_dir, "datasets")
     os.makedirs(output_dir, exist_ok=True)
 

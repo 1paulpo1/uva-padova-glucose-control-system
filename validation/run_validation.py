@@ -24,6 +24,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from parsers import discover, get_parser_for_source, BaseParser
+from data_pipeline import FilterConfig, process_patient
 
 # MinGW-w64 DLL path — needed for test_real_data.exe
 _MINGW_BIN = r"C:\msys64\mingw64\bin"
@@ -287,6 +288,15 @@ def main():
                     help="Min CGM density (non-zero / expected 5-min slots, default: 0.5)")
     ap.add_argument("--verbose", action="store_true",
                     help="Show CMA-ES/Ceres output during identification")
+    ap.add_argument("--gb-method", default="median",
+                    choices=["median", "fasting_p10"],
+                    help="Basal glucose estimation method")
+    ap.add_argument("--min-cgm-points", type=int, default=50,
+                    help="Min CGM points after filtering (default: 50)")
+    ap.add_argument("--max-cgm-gap", type=float, default=120.0,
+                    help="Max allowed CGM gap in minutes (default: 120)")
+    ap.add_argument("--outlier-zscore", type=float, default=4.0,
+                    help="CGM outlier z-score threshold (default: 4.0)")
     args = ap.parse_args()
 
     # ── Init parser ──────────────────────────────────────────────────────
@@ -411,6 +421,8 @@ def main():
         print(f"\nBatch {batch_idx}: {len(batch_patients)} patients"
               f" ({total_done}/{args.max_patients} done)")
 
+        patient_gb: dict[str, float] = {}
+
         for pid, weight_lbs in batch_patients:
             suffix = f"{args.days}d"
             cgm_csv = output_dir / f"patient{pid}_{suffix}_cgm_meals_bolus.csv"
@@ -421,7 +433,6 @@ def main():
                 print(f"  [{pid}] generating CSV...", end=" ", flush=True)
                 try:
                     data = parser.parse_patient(pid, args.parquet, days=args.days)
-                    cgm_csv, basal_csv = BaseParser.write_csvs(data, str(output_dir), suffix=suffix)
                 except ValueError as e:
                     print(f"SKIP ({e})")
                     pr = {"id": pid, "batch": batch_idx, "error": f"csv_gen: {e}"}
@@ -432,6 +443,33 @@ def main():
                     results["processed_ids"] = sorted(processed)
                     save_results(str(results_path), results)
                     continue
+
+                # Data pipeline filter
+                filter_config = FilterConfig(
+                    gb_method=args.gb_method,
+                    min_cgm_points=args.min_cgm_points,
+                    max_cgm_gap_minutes=args.max_cgm_gap,
+                    outlier_zscore=args.outlier_zscore,
+                )
+                data, meta = process_patient(data, filter_config)
+
+                for w in meta.warnings:
+                    print(f"  [{pid}] warning: {w}")
+                if not meta.valid:
+                    print(f"SKIP ({'; '.join(meta.warnings[:3])})")
+                    pr = {"id": pid, "batch": batch_idx,
+                          "error": f"filter: {'; '.join(meta.warnings[:3])}",
+                          "gb": meta.gb_estimate, "cgm_density": meta.cgm_density}
+                    batch_record["patients"].append(pr)
+                    processed.add(pid)
+                    total_done += 1
+                    results["batches"].append({"batch": batch_idx, "patient": pr})
+                    results["processed_ids"] = sorted(processed)
+                    save_results(str(results_path), results)
+                    continue
+
+                patient_gb[pid] = meta.gb_estimate
+                cgm_csv, basal_csv = BaseParser.write_csvs(data, str(output_dir), suffix=suffix)
                 print("OK")
 
             # Check CSV quality
@@ -479,6 +517,8 @@ def main():
             pr["id"] = pid
             pr["batch"] = batch_idx
             pr["cgm_density"] = cgm_density
+            if pid in patient_gb:
+                pr["gb"] = patient_gb[pid]
             batch_record["patients"].append(pr)
 
             if pr.get("error"):

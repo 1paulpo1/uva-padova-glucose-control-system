@@ -49,7 +49,7 @@ def cmd_scan(args):
         print(f"  Filtering study: {args.study}")
 
     sig = None if args.no_cache else BaseParser._parquet_signature(args.source)
-    output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "output")
+    output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "datasets")
     patients = (None if args.no_cache
                 else BaseParser._load_scan_cache(output_dir, sig, args.study))
 
@@ -105,7 +105,7 @@ def cmd_parse(args):
         eligible = eligible[:n]
         patient_ids = [pid for pid, _ in eligible]
 
-    output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "output")
+    output_dir = args.output_dir or os.path.join(os.path.dirname(__file__), "datasets")
 
     print(f"\nProcessing {len(patient_ids)} patients, {args.days} days each\n")
     results = []

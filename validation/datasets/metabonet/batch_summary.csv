@@ -1,4 +1,0 @@
-id,weight_lbs,weight_kg,status,cgm,meals,boluses,basal_segments,days
-620,110.0,49.89512,ok,1217,11,30,595,7
-258,80.0,36.28736,no_cgm,0,0,0,1,0
-605,278.0,126.098576,ok,1741,25,31,1,7

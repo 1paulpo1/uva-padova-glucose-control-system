@@ -11,6 +11,7 @@ import pyarrow.parquet as pq
 from .base_parser import BaseParser, PatientData, U_TO_PMOL, DAY_MINUTES
 from .registry import register
 
+BASAL_SCALE = 12.0  # convert per-minute basal rate to U/hr at 5-min sampling interval
 AUDIT_COLS = ["id", "weight", "source_file", "carbs", "bolus", "CGM"]
 
 
@@ -84,9 +85,9 @@ class MetabonetParser(BaseParser):
         pf = pq.ParquetFile(source_path)
         n_groups = pf.metadata.num_row_groups
         n_scan = min(n_groups, max(40, 100)) if limit is None else n_groups
-        # Cap scan to 60 row groups to bound memory usage
-        if n_scan > 60:
-            n_scan = min(n_scan, 60)
+        # Cap scan to 60 row groups if no explicit limit (backward-compatible)
+        if limit is None and n_scan > 60:
+            n_scan = 60
 
         patients: dict = {}
         done = False
@@ -121,7 +122,7 @@ class MetabonetParser(BaseParser):
                     "boluses": int((sub["bolus"].fillna(0) > 0).sum()),
                     "cgm": int(sub["CGM"].notna().sum()),
                 }
-                if limit is not None and len(patients) >= limit:
+                if limit is not None and limit > 0 and len(patients) >= limit:
                     done = True
                     break
             if (rg_idx + 1) % 20 == 0:
@@ -198,7 +199,7 @@ class MetabonetParser(BaseParser):
         rows = []
         for _, row in df.iterrows():
             cgm = row["CGM"]
-            cgm_val = cgm if (cgm is not None and cgm == cgm and cgm > 0) else 0.0
+            cgm_val = cgm if (cgm is not None and cgm == cgm and cgm > 0) else float("nan")
             carbs_g = row["carbs"]
             meal_mg = 0.0
             if carbs_g is not None and carbs_g == carbs_g and carbs_g > 0:
@@ -214,6 +215,22 @@ class MetabonetParser(BaseParser):
                 "bolus_pmol_kg": bolus_pmol_kg,
             })
 
+        # Group by t_min: merge multiple parquet rows per timestamp
+        from collections import defaultdict
+        grouped = defaultdict(lambda: [float("nan"), 0.0, 0.0])
+        for r in rows:
+            t = r["t_min"]
+            cgm = r["cgm_mgdl"]
+            if cgm == cgm:  # not NaN
+                if cgm > grouped[t][0] or (grouped[t][0] != grouped[t][0]):
+                    grouped[t][0] = cgm
+            grouped[t][1] += r["meal_mg"]
+            grouped[t][2] += r["bolus_pmol_kg"]
+        rows = [
+            {"t_min": t, "cgm_mgdl": v[0], "meal_mg": v[1], "bolus_pmol_kg": v[2]}
+            for t, v in sorted(grouped.items())
+        ]
+
         df_basal = df.copy()
         df_basal["basal"] = (df_basal["basal"] * BASAL_SCALE).round(6)
         basal_segments_raw = _aggregate_basal(df_basal)
@@ -222,8 +239,6 @@ class MetabonetParser(BaseParser):
             t = _minutes_since_ref(dt, ref_time)
             if 0 <= t < t_end:
                 basal_segments.append({"t_min": t, "basal_u_per_hr": rate})
-
-        rows.sort(key=lambda r: r["t_min"])
         basal_segments.sort(key=lambda r: r["t_min"])
 
         ndays = t_end // DAY_MINUTES

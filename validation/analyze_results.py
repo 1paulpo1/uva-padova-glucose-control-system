@@ -60,7 +60,7 @@ def main():
 
     # Resolve JSON path
     script_dir = Path(__file__).parent.resolve()
-    output_dir = Path(args.out or script_dir / "output")
+    output_dir = Path(args.out or script_dir / "datasets")
     json_path = args.json or str(output_dir / "validation_results_analysis.json")
 
     if not os.path.exists(json_path):
@@ -101,13 +101,13 @@ def main():
     print(f"  Parameters:         {n_params}")
 
     # Print tables
-    print("\n── Detailed Gate Table ──")
+    print("\n-- Detailed Gate Table --")
     print_detailed_gate_table(data)
 
-    print("\n── Prior-Dominated Ranking ──")
+    print("\n-- Prior-Dominated Ranking --")
     print_prior_dominated_ranking(data)
 
-    print("\n── Summary Table ──")
+    print("\n-- Summary Table --")
     print_summary_table(data)
 
     # Generate plots

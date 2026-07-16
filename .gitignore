@@ -22,20 +22,7 @@ CMakeFiles/
 crossval/output/
 crossval_results_*.csv
 *.png
-validation/datasets/CTR3/
-validation/datasets/DCLP3/
-validation/datasets/DCLP5/
-validation/datasets/Flair/
-validation/datasets/IOBP2/
-validation/datasets/Loop/
-validation/datasets/ReplaceBG/
-validation/datasets/ShanghaiT1DM/
-validation/datasets/T1D-UOM/
-validation/datasets/metabonet/
-validation/datasets/patient_scan_cache.json
 validation/figures/*
-!validation/figures/*.py
-validation/datasets/*.xml
 
 
 # Python

@@ -158,10 +158,22 @@ class StudyScheduler:
             patients = sorted(by_study[study_name], key=sort_key)
             for info in patients:
                 n_windows = 0
+                if window_days <= 0:
+                    # window_days ≤ 0 → single full-span window
+                    sp = RunSpec(study=study_name, patient_id=info.pid,
+                                 weight_lbs=info.weight_lbs,
+                                 window_start_days=0,
+                                 window_days=info.total_days)
+                    specs.append(sp)
+                    continue
                 max_start = info.total_days - window_days
                 if max_start < 0:
                     max_start = 0
-                for offset in range(0, max_start + 1, stride):
+                if stride <= 0:
+                    stride_ = window_days  # no sliding → 1 window
+                else:
+                    stride_ = stride
+                for offset in range(0, max_start + 1, stride_):
                     if max_windows_per_patient > 0 and n_windows >= max_windows_per_patient:
                         break
                     specs.append(RunSpec(

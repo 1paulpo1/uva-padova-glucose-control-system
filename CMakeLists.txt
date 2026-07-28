@@ -107,6 +107,29 @@ target_compile_definitions(uva_padova_id
     UVA_PADOVA_CONFIG_DIR="${CMAKE_SOURCE_DIR}/config"
 )
 
+# Online adaptation library (CKF, RTS smoother, meal priors)
+add_library(uva_padova_online INTERFACE)
+target_include_directories(uva_padova_online
+  INTERFACE
+    include
+    ${EIGEN3_INCLUDE_DIR}
+)
+target_link_libraries(uva_padova_online
+  INTERFACE
+    uva_padova_id
+)
+target_sources(uva_padova_online
+  INTERFACE
+    include/uva_padova/augmented_state.hpp
+    include/uva_padova/cubature_kalman_filter.hpp
+    include/uva_padova/system_model.hpp
+    include/uva_padova/measurement_model.hpp
+    include/uva_padova/regime_modulated_q.hpp
+    include/uva_padova/rts_smoother.hpp
+    include/uva_padova/meal_prior_store.hpp
+    include/uva_padova/online_adaptation.hpp
+)
+
 target_compile_options(uva_padova_core PRIVATE -Wall -Wextra -Wpedantic)
 target_compile_options(uva_padova_id PRIVATE -Wall -Wextra -Wpedantic)
 

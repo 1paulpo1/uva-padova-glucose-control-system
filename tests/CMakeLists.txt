@@ -33,8 +33,19 @@ target_link_options(test_optimizer PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 # ===========================================================================
 # Register gtest-based tests with CTest
 # ===========================================================================
+# ===========================================================================
+# CKF online adaptation tests
+# ===========================================================================
+add_executable(test_ckf
+  unit/ckf_test.cpp
+)
+target_link_libraries(test_ckf PRIVATE uva_padova_online GTest::gtest GTest::gtest_main)
+target_include_directories(test_ckf PRIVATE ${CMAKE_SOURCE_DIR}/include)
+target_link_options(test_ckf PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
+
 include(GoogleTest)
 gtest_discover_tests(unit_core)
+gtest_discover_tests(test_ckf)
 gtest_discover_tests(unit_id)
 gtest_discover_tests(test_optimizer)
 

@@ -12,6 +12,7 @@ Testing/
 *.swp
 *.swo
 *~
+.opencode/
 
 # OS
 .DS_Store

@@ -449,12 +449,12 @@ struct ObservationCost : ceres::CostFunction {
   template<typename T>
   static void copy_params(const Params& src, BasicParams<T>& dst) {
     dst.VG   = T(src.VG);   dst.k1  = T(src.k1);   dst.k2  = T(src.k2);
-    dst.VI   = T(src.VI);   dst.m1  = T(src.m1);   dst.m2  = T(src.m2);   dst.m4  = T(src.m4);
+    dst.VI   = T(src.VI);   dst.m1  = T(src.m1);   dst.m2  = T(src.m2);   dst.m4  = T(src.m4);   dst.HE_b = T(src.HE_b);
     dst.kmax = T(src.kmax); dst.kmin = T(src.kmin); dst.kabs = T(src.kabs); dst.kgri = T(src.kgri);
     dst.f    = T(src.f);    dst.b   = T(src.b);     dst.d   = T(src.d);
     dst.kp1  = T(src.kp1);  dst.kp2 = T(src.kp2);   dst.kp3 = T(src.kp3);   dst.ki  = T(src.ki);
     dst.Fcns = T(src.Fcns); dst.Vm0 = T(src.Vm0);   dst.Vmx = T(src.Vmx);
-    dst.Km0  = T(src.Km0);  dst.p2U = T(src.p2U);   dst.r1  = T(src.r1);    dst.Gth = T(src.Gth);
+    dst.Km0  = T(src.Km0);  dst.p2U = T(src.p2U);   dst.r1  = T(src.r1);    dst.r2  = T(src.r2);    dst.Gth = T(src.Gth);
     dst.ke1  = T(src.ke1);  dst.ke2 = T(src.ke2);
     dst.ka1  = T(src.ka1);  dst.ka2 = T(src.ka2);   dst.kd  = T(src.kd);
     dst.Ts   = T(src.Ts);
@@ -481,12 +481,12 @@ struct ObservationCost : ceres::CostFunction {
   static BasicParams<double> to_double(const BasicParams<T>& src) {
     BasicParams<double> dst;
     dst.VG   = extract_val(src.VG);   dst.k1  = extract_val(src.k1);   dst.k2  = extract_val(src.k2);
-    dst.VI   = extract_val(src.VI);   dst.m1  = extract_val(src.m1);   dst.m2  = extract_val(src.m2);   dst.m4  = extract_val(src.m4);
+    dst.VI   = extract_val(src.VI);   dst.m1  = extract_val(src.m1);   dst.m2  = extract_val(src.m2);   dst.m4  = extract_val(src.m4);   dst.HE_b = extract_val(src.HE_b);
     dst.kmax = extract_val(src.kmax); dst.kmin = extract_val(src.kmin); dst.kabs = extract_val(src.kabs); dst.kgri = extract_val(src.kgri);
     dst.f    = extract_val(src.f);    dst.b   = extract_val(src.b);     dst.d   = extract_val(src.d);
     dst.kp1  = extract_val(src.kp1);  dst.kp2 = extract_val(src.kp2);   dst.kp3 = extract_val(src.kp3);   dst.ki  = extract_val(src.ki);
     dst.Fcns = extract_val(src.Fcns); dst.Vm0 = extract_val(src.Vm0);   dst.Vmx = extract_val(src.Vmx);
-    dst.Km0  = extract_val(src.Km0);  dst.p2U = extract_val(src.p2U);   dst.r1  = extract_val(src.r1);    dst.Gth = extract_val(src.Gth);
+    dst.Km0  = extract_val(src.Km0);  dst.p2U = extract_val(src.p2U);   dst.r1  = extract_val(src.r1);    dst.r2  = extract_val(src.r2);    dst.Gth = extract_val(src.Gth);
     dst.ke1  = extract_val(src.ke1);  dst.ke2 = extract_val(src.ke2);
     dst.ka1  = extract_val(src.ka1);  dst.ka2 = extract_val(src.ka2);   dst.kd  = extract_val(src.kd);
     dst.Ts   = extract_val(src.Ts);

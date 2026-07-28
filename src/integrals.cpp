@@ -33,12 +33,13 @@ static double steady_state_solve(State& state_out, const Params& p,
 
   // --- Insulin kinetics: solve 2×2 system for Ip, Ii ---
   // 0 = -(m2+m4)*Ip + m1*Ii + ka1*Isc1 + ka2*Isc2
-  // 0 = -(m1+m4)*Ii + m2*Ip
-  double denom = (p.m2 + p.m4) * (p.m1 + p.m4) - p.m1 * p.m2;
+  // 0 = -(m1+m3)*Ii + m2*Ip
+  double m3 = p.m1 * p.HE_b / (1.0 - p.HE_b);
+  double denom = (p.m2 + p.m4) * (p.m1 + m3) - p.m1 * p.m2;
   if (std::abs(denom) < 1e-20) denom = 1e-20;
   double rhs_I = p.ka1 * Isc1 + p.ka2 * Isc2;
-  double Ip = rhs_I * (p.m1 + p.m4) / denom;
-  double Ii = p.m2 * Ip / (p.m1 + p.m4);
+  double Ip = rhs_I * (p.m1 + m3) / denom;
+  double Ii = p.m2 * Ip / (p.m1 + m3);
 
   // --- EGP delays (SS: I_prime = Xl = Ip/VI) ---
   double I_conc = Ip / p.VI;
@@ -53,10 +54,11 @@ static double steady_state_solve(State& state_out, const Params& p,
   double risk = 0.0;
   if (p.r1 > 0.0 && G_conc < p.Gb) {
     using std::log; using std::pow;
-    double r2 = 2.0;
-    double f_val = pow(log(G_conc), r2) - pow(log(p.Gb), r2);
+    double ratio = log(G_conc / p.Gb);
+    double f_val = pow(ratio, p.r2);
     if (G_conc < p.Gth) {
-      f_val = pow(log(p.Gth), r2) - pow(log(p.Gb), r2);
+      double ratio_th = log(p.Gth / p.Gb);
+      f_val = pow(ratio_th, p.r2);
     }
     risk = 10.0 * f_val * f_val;
   }

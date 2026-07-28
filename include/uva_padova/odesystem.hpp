@@ -27,7 +27,7 @@ struct UvaPadovaODESystem {
     // ---- Glucose kinetics [A1] ----
     {
       T G = x.Gp / p.VG;
-      T risk = risk_factor(G, p.Gb, p.Gth, p.r1);
+      T risk = risk_factor(G, p.Gb, p.Gth, p.r1, p.r2);
       T Vm  = p.Vm0 + p.Vmx * x.X * (T(1) + p.r1 * risk);
       if (Vm < T(0)) Vm = T(0);
       T Uid = Vm * x.Gt / (p.Km0 + x.Gt);
@@ -43,8 +43,9 @@ struct UvaPadovaODESystem {
     // ---- Insulin kinetics [A2] ----
     {
       T Ra_I = p.ka1 * x.Isc1 + p.ka2 * x.Isc2;
+      T m3 = p.m1 * p.HE_b / (T(1) - p.HE_b);
       dxdt.Ip = -(p.m2 + p.m4) * x.Ip + p.m1 * x.Ii + Ra_I;
-      dxdt.Ii = -(p.m1 + p.m4) * x.Ii + p.m2 * x.Ip;
+      dxdt.Ii = -(p.m1 + m3) * x.Ii + p.m2 * x.Ip;
     }
 
     // ---- GI absorption [A3–A4] ----
@@ -175,28 +176,29 @@ struct UvaPadovaODESystem {
   static T utilization_insulin_dependent(const BasicState<T>& x,
                                           const BasicParams<T>& p) {
     T G = plasma_glucose(x, p);
-    T risk = risk_factor(G, p.Gb, p.Gth, p.r1);
+    T risk = risk_factor(G, p.Gb, p.Gth, p.r1, p.r2);
     T Vm = p.Vm0 + p.Vmx * x.X * (T(1) + p.r1 * risk);
     if (Vm < T(0)) Vm = T(0);
     return Vm * x.Gt / (p.Km0 + x.Gt);
   }
 
-  // Unified risk computation per validated formula (A13):
-  //   risk = 10 · [log(G/Gb)]^4  for G < Gb
-  //   risk = 10 · [log(Gth/Gb)]^4 for G < Gth
+  // Unified risk function per (A12)–(A13):
+  //   f(G)  = [log(G/Gb)]^{r2}
+  //   risk  = 10 · [f(G)]^2    for G < Gb
+  //         10 · [f(Gth)]^2    for G < Gth
   // G is clamped to ≥1e-3 mg/dL to protect log().
   template<typename T>
   static T risk_factor(const T& G_mgdl, const T& Gb,
-                        const T& Gth, const T& r1) {
-    using std::log;
+                        const T& Gth, const T& r1, const T& r2) {
+    using std::log; using std::pow;
     if (r1 == T(0)) return T(0);
     if (G_mgdl >= Gb) return T(0);
     T G_safe = (G_mgdl > T(1e-3)) ? G_mgdl : T(1e-3);
     T ratio = log(G_safe / Gb);
-    T f_val = ratio * ratio;
+    T f_val = pow(ratio, r2);
     if (G_mgdl < Gth) {
       T ratio_th = log(Gth / Gb);
-      f_val = ratio_th * ratio_th;
+      f_val = pow(ratio_th, r2);
     }
     return T(10) * f_val * f_val;
   }
@@ -205,15 +207,6 @@ struct UvaPadovaODESystem {
   static T risk_function(const T& G_mgdl, const T& Gb,
                           const T& Gth, const T& r1) {
     return risk_factor(G_mgdl, Gb, Gth, r1);
-  }
-
-  template<typename T>
-  static T f_risk(const T& G, const T& Gb, const T& r2) {
-    using std::log; using std::pow;
-    if (G <= T(0) || Gb <= T(0)) return T(0);
-    T G_safe = (G > T(1e-3)) ? G : T(1e-3);
-    T ratio = log(G_safe / Gb);
-    return pow(ratio, r2);
   }
 
   template<typename T>

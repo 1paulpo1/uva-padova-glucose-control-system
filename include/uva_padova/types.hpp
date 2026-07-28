@@ -14,7 +14,8 @@ namespace uva_padova {
 enum class ParamId : int {
   VG, k1, k2, VI, m1, m2, m4, kmax, kmin, kabs, kgri, f, b, d,
   kp1, kp2, kp3, ki, Fcns, Vm0, Vmx, Km0, p2U, r1, Gth,
-  ke1, ke2, ka1, ka2, kd, Ts, BW, Gb, Ib,
+  ke1, ke2, ka1, ka2, kd,   Ts, BW, Gb, Ib,
+  HE_b, r2,
   COUNT
 };
 
@@ -25,7 +26,8 @@ inline const std::string& param_name(ParamId id) {
     "kp1", "kp2", "kp3", "ki", "Fcns", "Vm0", "Vmx", "Km0",
     "p2U", "r1", "Gth",
     "ke1", "ke2", "ka1", "ka2", "kd",
-    "Ts", "BW", "Gb", "Ib"
+    "Ts", "BW", "Gb", "Ib",
+    "HE_b", "r2"
   };
   return names[static_cast<int>(id)];
 }
@@ -37,7 +39,8 @@ inline ParamId param_id_from_string(const std::string& name) {
     "kp1", "kp2", "kp3", "ki", "Fcns", "Vm0", "Vmx", "Km0",
     "p2U", "r1", "Gth",
     "ke1", "ke2", "ka1", "ka2", "kd",
-    "Ts", "BW", "Gb", "Ib"
+    "Ts", "BW", "Gb", "Ib",
+    "HE_b", "r2"
   };
   for (int i = 0; i < static_cast<int>(ParamId::COUNT); ++i) {
     if (name == names[i]) return static_cast<ParamId>(i);
@@ -99,6 +102,7 @@ struct BasicParams {
   T m1{0.190};   // hepatic insulin transfer         [1/min]
   T m2{0.484};   // plasma insulin clearance         [1/min]
   T m4{0.194};   // plasma insulin degradation       [1/min]
+  T HE_b{0.6};   // hepatic extraction, constant T1DM [dimensionless]
 
   // --- GI absorption [A3–A4] ---
   T kmax{0.0558}; // max gastric emptying rate       [1/min]
@@ -122,6 +126,7 @@ struct BasicParams {
   T Km0{225.59};  // Michaelis constant               [mg/kg]
   T p2U{0.0331};  // utilization delay               [1/min]
   T r1{0.0};      // hypo risk multiplier            [dimensionless]
+  T r2{2.0};      // risk function shape exponent    [dimensionless]
   T Gth{60.0};    // hypo threshold                  [mg/dl]
 
   // --- Renal excretion [A14] ---
@@ -157,7 +162,7 @@ inline T& param_by_id(BasicParams<T>& p, ParamId id) {
   switch (id) {
     case ParamId::VG:   return p.VG;   case ParamId::k1:   return p.k1;   case ParamId::k2:   return p.k2;
     case ParamId::VI:   return p.VI;   case ParamId::m1:   return p.m1;   case ParamId::m2:   return p.m2;
-    case ParamId::m4:   return p.m4;
+    case ParamId::m4:   return p.m4;   case ParamId::HE_b: return p.HE_b;
     case ParamId::kmax: return p.kmax; case ParamId::kmin: return p.kmin;
     case ParamId::kabs: return p.kabs; case ParamId::kgri: return p.kgri;
     case ParamId::f:    return p.f;    case ParamId::b:    return p.b;    case ParamId::d:    return p.d;
@@ -165,7 +170,7 @@ inline T& param_by_id(BasicParams<T>& p, ParamId id) {
     case ParamId::ki:   return p.ki;
     case ParamId::Fcns: return p.Fcns; case ParamId::Vm0:  return p.Vm0;  case ParamId::Vmx:  return p.Vmx;
     case ParamId::Km0:  return p.Km0;  case ParamId::p2U:  return p.p2U;
-    case ParamId::r1:   return p.r1;   case ParamId::Gth:  return p.Gth;
+    case ParamId::r1:   return p.r1;   case ParamId::r2:   return p.r2;   case ParamId::Gth:  return p.Gth;
     case ParamId::ke1:  return p.ke1;  case ParamId::ke2:  return p.ke2;
     case ParamId::ka1:  return p.ka1;  case ParamId::ka2:  return p.ka2;  case ParamId::kd:   return p.kd;
     case ParamId::Ts:   return p.Ts;

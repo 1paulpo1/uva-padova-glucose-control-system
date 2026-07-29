@@ -2,6 +2,8 @@
 #include <cmath>
 #include <vector>
 
+#include <ceres/ceres.h>
+
 #include "uva_padova/cost_function.hpp"
 #include "mocks/mock_simulator.h"
 #include "test_data/synthetic_data.h"
@@ -12,7 +14,7 @@ using namespace uva_padova;
 //  Death test: n_params_ > kMaxJetDim → std::abort
 // ---------------------------------------------------------------------------
 TEST(ObservationCostDeathTest, too_many_params) {
-  std::vector<ParamDescriptor> descs(31, ParamDescriptor{"x"});
+  std::vector<ParamDescriptor> descs(50, ParamDescriptor{"x"});
   IdentificationData d;
   d.finalize();
   EXPECT_DEATH({ ObservationCost<MockSimulator> cost(d, Params{}, descs); }, "");
@@ -107,8 +109,8 @@ TEST(ObservationCostTest, scalar_cost) {
 
   // r = (100 - 120) / 2.9
   double r = (100.0 - 120.0) / 2.9;
-  double sum_sq = r * r * cost.n_obs_;
-  double expected = std::sqrt(1.0 + sum_sq) - 1.0;
+  double per_element = std::sqrt(1.0 + r * r) - 1.0;
+  double expected = per_element * cost.n_obs_;
 
   EXPECT_NEAR(cost.compute_scalar_cost(theta.data()), expected, 1e-10);
 }
@@ -126,6 +128,38 @@ TEST(ObservationCostTest, scalar_cost_zero) {
 
   std::vector<double> theta = {0.0};
   EXPECT_NEAR(cost.compute_scalar_cost(theta.data()), 0.0, 1e-10);
+}
+
+// ---------------------------------------------------------------------------
+//  scalar_cost_per_element_matches_ceres: per-observation Ceres problem
+//  produces same final_cost as compute_scalar_cost
+// ---------------------------------------------------------------------------
+TEST(ObservationCostTest, scalar_cost_per_element_matches_ceres) {
+  MockSimulator::reset();
+  MockSimulator::ss_state.Gsc = 100.0;
+  MockSimulator::basal_insulin = 1.0;
+
+  auto data = make_id_data({0.0, 10.0}, {}, {}, {}, {}, {}, {}, 120.0);
+  std::vector<ParamDescriptor> descs = {{"kp1"}};
+  ObservationCost<MockSimulator> obs_cost(data, Params::defaults_t1d(), descs);
+
+  std::vector<double> theta = {0.0};
+  double scalar = obs_cost.compute_scalar_cost(theta.data());
+  EXPECT_TRUE(std::isfinite(scalar));
+
+  auto cache = std::make_shared<SimulationCache>();
+  ceres::Problem problem;
+  for (int i = 0; i < obs_cost.n_obs_; ++i) {
+    problem.AddResidualBlock(
+        new PerObservationCost<MockSimulator>(&obs_cost, i, cache),
+        new ceres::SoftLOneLoss(1.0), theta.data());
+  }
+
+  ceres::Problem::EvaluateOptions eval_opts;
+  double ceres_cost = 0.0;
+  problem.Evaluate(eval_opts, &ceres_cost, nullptr, nullptr, nullptr);
+
+  EXPECT_NEAR(ceres_cost, scalar, 1e-10);
 }
 
 // ---------------------------------------------------------------------------

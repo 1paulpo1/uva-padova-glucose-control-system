@@ -4,6 +4,7 @@
 
 #include <cmath>
 #include <iostream>
+#include <memory>
 #include <random>
 
 #include <ceres/ceres.h>
@@ -58,7 +59,15 @@ LMOptimizer::Result LMOptimizer::run(
   problem_options.cost_function_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
   ceres::Problem problem(problem_options);
 
-  problem.AddResidualBlock(&obs_cost, new ceres::SoftLOneLoss(1.0), x.data());
+  auto cache = std::make_shared<SimulationCache>();
+  std::vector<std::unique_ptr<PerObservationCost<Simulator>>> per_costs;
+  per_costs.reserve(obs_cost.n_obs_);
+  for (int i = 0; i < obs_cost.n_obs_; ++i) {
+    per_costs.push_back(std::make_unique<PerObservationCost<Simulator>>(
+        &obs_cost, i, cache));
+    problem.AddResidualBlock(per_costs.back().get(),
+                             new ceres::SoftLOneLoss(1.0), x.data());
+  }
   problem.AddResidualBlock(&prior_cost, nullptr, x.data());
 
   for (int i = 0; i < obs_cost.n_params_; ++i) {
@@ -128,7 +137,15 @@ LMOptimizer::CovarianceResult LMOptimizer::compute_covariance(
   ceres::Problem::Options tmp_problem_options;
   tmp_problem_options.cost_function_ownership = ceres::DO_NOT_TAKE_OWNERSHIP;
   ceres::Problem tmp_problem(tmp_problem_options);
-  tmp_problem.AddResidualBlock(&obs_cost, new ceres::SoftLOneLoss(1.0), x.data());
+  auto cache = std::make_shared<SimulationCache>();
+  std::vector<std::unique_ptr<PerObservationCost<Simulator>>> per_costs;
+  per_costs.reserve(obs_cost.n_obs_);
+  for (int i = 0; i < obs_cost.n_obs_; ++i) {
+    per_costs.push_back(std::make_unique<PerObservationCost<Simulator>>(
+        &obs_cost, i, cache));
+    tmp_problem.AddResidualBlock(per_costs.back().get(),
+                                 new ceres::SoftLOneLoss(1.0), x.data());
+  }
   tmp_problem.AddResidualBlock(&prior_cost, nullptr, x.data());
 
   Eigen::MatrixXd cov_mat = detail::prior_covariance(prior_cost);

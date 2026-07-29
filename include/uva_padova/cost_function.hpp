@@ -5,6 +5,7 @@
 #include <utility>
 #include <cmath>
 #include <numeric>
+#include <memory>
 
 #include <Eigen/Dense>
 #include <ceres/jet.h>
@@ -54,6 +55,34 @@ struct ParamDescriptor {
 };
 
 // ---------------------------------------------------------------------------
+// Cache for batch-simulated trajectories (avoids N re-simulations).
+// PerObservationCost shares one cache via shared_ptr; re-simulation only
+// occurs when the parameter vector changes.
+// ---------------------------------------------------------------------------
+struct SimulationCache {
+  std::vector<double> last_theta;
+  std::vector<double> cgm_sim;
+  Eigen::MatrixXd J_sim;  // n_obs × n_params
+  int version{0};
+
+  bool is_valid(const double* theta, int n_params) const {
+    if (static_cast<int>(last_theta.size()) != n_params) return false;
+    for (int i = 0; i < n_params; ++i)
+      if (std::abs(last_theta[i] - theta[i]) > 1e-15) return false;
+    return true;
+  }
+
+  void update(const double* theta, int n_params,
+              const std::vector<double>& cgm,
+              const Eigen::MatrixXd& J) {
+    last_theta.assign(theta, theta + n_params);
+    cgm_sim = cgm;
+    J_sim = J;
+    ++version;
+  }
+};
+
+// ---------------------------------------------------------------------------
 // Observation cost — returns plain standardized residuals for LM.
 // Robustness is handled by ceres::SoftLOneLoss passed in AddResidualBlock.
 //
@@ -67,7 +96,8 @@ struct ParamDescriptor {
 // ---------------------------------------------------------------------------
 template <typename Simulator = UvaPadovaSimulator>
 struct ObservationCost : ceres::CostFunction {
-  static constexpr int kMaxJetDim = 30;
+  // Covers: state (14) + basal (1) + up to 49 active params.
+  static constexpr int kMaxJetDim = 64;
   using JetT = ceres::Jet<double, kMaxJetDim>;
 
   const IdentificationData data_;
@@ -84,8 +114,9 @@ struct ObservationCost : ceres::CostFunction {
     : data_(data), base_params_(base_params),
       param_desc_(param_desc), n_params_(static_cast<int>(param_desc.size())),
       n_obs_(static_cast<int>(data.cgm_time.size())) {
-    if (n_params_ > kMaxJetDim) {
+    if (BasicState<double>::kSize + 1 + n_params_ > kMaxJetDim) {
       std::cerr << "ObservationCost: n_params=" << n_params_
+                << " with kStateDim+1=" << (BasicState<double>::kSize + 1)
                 << " exceeds kMaxJetDim=" << kMaxJetDim << "\n";
       std::abort();
     }
@@ -100,8 +131,9 @@ struct ObservationCost : ceres::CostFunction {
     : data_(data), base_params_(base_params),
       param_desc_(param_desc), n_params_(static_cast<int>(param_desc.size())),
       n_obs_(static_cast<int>(data.cgm_time.size())), sigma_(sigma) {
-    if (n_params_ > kMaxJetDim) {
+    if (BasicState<double>::kSize + 1 + n_params_ > kMaxJetDim) {
       std::cerr << "ObservationCost: n_params=" << n_params_
+                << " with kStateDim+1=" << (BasicState<double>::kSize + 1)
                 << " exceeds kMaxJetDim=" << kMaxJetDim << "\n";
       std::abort();
     }
@@ -174,20 +206,49 @@ struct ObservationCost : ceres::CostFunction {
     return true;
   }
 
-  // ---- Scalar cost (matches Ceres objective on aggregate ||r||²) ----
-  // Returns √(1 + Σᵢ rᵢ²) − 1, which is exactly the objective reported by
-  // Ceres in summary.final_cost for a single SoftLOneLoss-wrapped residual
-  // block with squared norm ||r||².
+  // ---- Scalar cost (per-element SoftL1, matches per-observation blocks) ----
+  // Returns Σᵢ (√(1 + rᵢ²) − 1), which matches the sum of N per-observation
+  // SoftLOneLoss(1.0) blocks in summary.final_cost.
   double compute_scalar_cost(const double* params) const {
     eval_count_++;
     auto cgm = simulate_observations<double>(params);
-    double sum_sq = 0.0;
+    double total = 0.0;
     for (int i = 0; i < n_obs_; ++i) {
       double r = (cgm[i] - data_.cgm_value[i]) / sigma_;
       if (!std::isfinite(r)) return 1e20;
-      sum_sq += r * r;
+      total += std::sqrt(1.0 + r * r) - 1.0;
     }
-    return std::sqrt(1.0 + sum_sq) - 1.0;
+    return total;
+  }
+
+  // ---- Batch simulation (single Jet pass, shared by PerObservationCost) ----
+  void batch_simulate(const double* params,
+                      std::shared_ptr<SimulationCache> cache) const {
+    if (cache && cache->is_valid(params, n_params_))
+      return;
+
+    eval_count_++;
+    JetT jet_params[kMaxJetDim];
+    for (int i = 0; i < n_params_; ++i) {
+      jet_params[i].a = params[i];
+      jet_params[i].v.setZero();
+      jet_params[i].v[i] = 1.0;
+    }
+    auto cgm = simulate_observations<JetT>(jet_params);
+
+    if (cache) {
+      std::vector<double> cgm_d(n_obs_);
+      Eigen::MatrixXd J(n_obs_, n_params_);
+      for (int i = 0; i < n_obs_; ++i) {
+        cgm_d[i] = extract_val(cgm[i]);
+        if (!std::isfinite(cgm_d[i])) { cache->update(params, n_params_, {}, Eigen::MatrixXd()); return; }
+        for (int j = 0; j < n_params_; ++j) {
+          J(i, j) = extract_deriv(cgm[i], j);
+          if (!std::isfinite(J(i, j))) { cache->update(params, n_params_, {}, Eigen::MatrixXd()); return; }
+        }
+      }
+      cache->update(params, n_params_, cgm_d, J);
+    }
   }
 
   // ---- Helpers for NaN-derivative detection and salvage ----
@@ -264,8 +325,8 @@ struct ObservationCost : ceres::CostFunction {
       //   [∂F/∂x  ∂F/∂u] [dx/dθ]   = -[∂F/∂θ]
       //   [∂h/∂x   0   ] [du/dθ]     -[∂h/∂θ]
       // One Jet<30> RHS evaluation gives all partials simultaneously.
-      // Note: kMaxJetDim=30 is used as the Jet dimension; the state (14),
-      // u_basal (1), and active params (≤ 9) fit with capacity to spare.
+      // Note: kMaxJetDim=64 covers the state (14), u_basal (1),
+      // and up to 49 active params with capacity to spare.
       constexpr int kStateDim = BasicState<T>::kSize;  // 14
       using JetAll = ceres::Jet<double, kMaxJetDim>;
 
@@ -495,6 +556,51 @@ struct ObservationCost : ceres::CostFunction {
     dst.Ts   = extract_val(src.Ts);
     dst.BW   = extract_val(src.BW);   dst.Gb  = extract_val(src.Gb);    dst.Ib  = extract_val(src.Ib);
     return dst;
+  }
+};
+
+// ---------------------------------------------------------------------------
+// Per-observation cost — one residual per CGM measurement.
+// Shares a SimulationCache via shared_ptr; the first PerObservationCost
+// to see a new parameter vector triggers a single Jet simulation that
+// populates the cache for all others.
+// ---------------------------------------------------------------------------
+template <typename Simulator = UvaPadovaSimulator>
+struct PerObservationCost : ceres::CostFunction {
+  const ObservationCost<Simulator>* parent_;
+  std::shared_ptr<SimulationCache> cache_;
+  int obs_idx_;
+  int n_params_;
+
+  PerObservationCost(const ObservationCost<Simulator>* parent,
+                     int obs_idx,
+                     std::shared_ptr<SimulationCache> cache)
+    : parent_(parent), cache_(std::move(cache)),
+      obs_idx_(obs_idx), n_params_(parent_->n_params_) {
+    set_num_residuals(1);
+    mutable_parameter_block_sizes()->push_back(n_params_);
+  }
+
+  bool Evaluate(const double* const* parameters, double* residuals,
+                double** jacobians) const override {
+    parent_->batch_simulate(parameters[0], cache_);
+    if (cache_->cgm_sim.empty()) return false;
+
+    double sim = cache_->cgm_sim[obs_idx_];
+    double obs = parent_->data_.cgm_value[obs_idx_];
+    double sigma = parent_->sigma_;
+    double r = (sim - obs) / sigma;
+    residuals[0] = r;
+    if (!std::isfinite(residuals[0])) return false;
+
+    if (jacobians != nullptr && jacobians[0] != nullptr) {
+      for (int j = 0; j < n_params_; ++j) {
+        double d = cache_->J_sim(obs_idx_, j) / sigma;
+        if (!std::isfinite(d)) return false;
+        jacobians[0][j] = d;
+      }
+    }
+    return true;
   }
 };
 

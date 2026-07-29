@@ -1,5 +1,7 @@
 #pragma once
 
+#include <algorithm>
+#include <cmath>
 #include <vector>
 #include <Eigen/Dense>
 
@@ -26,6 +28,9 @@ struct SystemModel {
   const double dt;         // integration time step [min]
   const double sub_dt;     // sub-step for RK4 (dt / n_sub)
   const int n_sub;
+  mutable std::vector<double> cached_theta_;
+  mutable double cached_basal_insulin{0.0};
+  mutable bool cached_basal_valid{false};
 
   SystemModel(const BasicParams<double>& params,
               const std::vector<ParamDescriptor>& desc,
@@ -48,6 +53,41 @@ struct SystemModel {
     return p;
   }
 
+  double basal_insulin_for_theta(const std::vector<double>& theta,
+                                 const BasicParams<double>& p) const {
+    if (cached_basal_valid && cached_theta_.size() == theta.size() &&
+        std::equal(theta.begin(), theta.end(), cached_theta_.begin())) {
+      return cached_basal_insulin;
+    }
+
+    State ss_state;
+    double insulin_ss = UvaPadovaSimulator::find_steady_state(ss_state, p, p.Gb);
+    cached_theta_ = theta;
+    cached_basal_insulin =
+        (std::isfinite(insulin_ss) && insulin_ss >= 0.0) ? insulin_ss : 0.0;
+    cached_basal_valid = true;
+    return cached_basal_insulin;
+  }
+
+  Eigen::MatrixXd jacobian(const Eigen::VectorXd& x_aug,
+                           double rel_eps = 1e-6) const {
+    const int dim = static_cast<int>(x_aug.size());
+    Eigen::MatrixXd F = Eigen::MatrixXd::Zero(dim, dim);
+
+    for (int j = 0; j < dim; ++j) {
+      Eigen::VectorXd xp = x_aug;
+      Eigen::VectorXd xm = x_aug;
+      double eps_j = rel_eps * std::max(1.0, std::abs(x_aug(j)));
+      xp(j) += eps_j;
+      xm(j) -= eps_j;
+      (*this)(xp);
+      (*this)(xm);
+      F.col(j) = (xp - xm) / (2.0 * eps_j);
+    }
+
+    return F;
+  }
+
   // operator(): advance augmented state by dt
   void operator()(Eigen::VectorXd& x_aug) const {
     const int n_theta = AugmentedStateMap<double>::n_theta(x_aug);
@@ -59,16 +99,7 @@ struct SystemModel {
       theta[i] = AugmentedStateMap<double>::theta(x_aug, i);
 
     BasicParams<double> p = adjusted_params(theta.data());
-
-    double basal_insulin = 0.0;
-    BasicParams<double> p_double = p;
-    {
-      State ss_state;
-      double insulin_ss = UvaPadovaSimulator::find_steady_state(ss_state, p_double, p_double.Gb);
-      if (std::isfinite(insulin_ss) && insulin_ss >= 0) {
-        basal_insulin = insulin_ss;
-      }
-    }
+    double basal_insulin = basal_insulin_for_theta(theta, p);
 
     BasicInputs<double> u;
     u.insulin_rate = basal_insulin;

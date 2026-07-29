@@ -629,3 +629,60 @@ TEST(CKFTest, ObservabilityModulatesRegimeQ) {
   // kabs should be at freeze_factor
   EXPECT_NEAR(Q3(14, 14), 0.001, 1e-10);
 }
+
+TEST(CKFTest, OnlineObservabilityBuildsFullGramian) {
+  const int dim = State::kSize;
+  OnlineObservability obs(dim);
+  obs.window_length = 1;
+
+  Eigen::MatrixXd A = Eigen::MatrixXd::Identity(dim, dim);
+  A(State::kGscIndex, State::kGpIndex) = 2.0;
+  A(State::kGscIndex, State::kXIndex) = -3.0;
+
+  auto linear_step = [&A](Eigen::VectorXd& x) {
+    x = A * x;
+  };
+
+  Eigen::VectorXd x0 = Eigen::VectorXd::Ones(dim);
+  obs.push_jacobian(linear_step, x0);
+
+  Eigen::MatrixXd W = obs.gramian();
+  Eigen::VectorXd s = obs.scores();
+
+  ASSERT_EQ(W.rows(), dim);
+  ASSERT_EQ(W.cols(), dim);
+  EXPECT_TRUE(W.isApprox(W.transpose(), 1e-12));
+  EXPECT_GT(std::abs(W(State::kGpIndex, State::kXIndex)), 1e-12);
+  EXPECT_NEAR(s(State::kGpIndex), 4.0, 1e-6);
+  EXPECT_NEAR(s(State::kXIndex), 9.0, 1e-6);
+  EXPECT_NEAR(s(State::kGscIndex), 1.0, 1e-6);
+}
+
+TEST(CKFTest, OnlineAdaptationScalesStateCovariancesByStateMagnitude) {
+  std::vector<ParamDescriptor> desc = {
+    {"kabs", 0.0, 2.0, 0.0, false, true}
+  };
+
+  Eigen::MatrixXd P0_theta(1, 1);
+  P0_theta(0, 0) = 0.1;
+  Eigen::VectorXd theta_init(1);
+  theta_init(0) = 0.0;
+  Eigen::MatrixXd Sigma_pop(1, 1);
+  Sigma_pop(0, 0) = 0.2;
+
+  OnlineAdaptationConfig cfg;
+  cfg.n_theta = 1;
+  cfg.sigma_cgm = 5.0;
+  cfg.alpha_q = 0.02;
+
+  OnlineAdaptation adapter(cfg, Params::defaults_t1d(), desc,
+                           P0_theta, theta_init, Sigma_pop);
+
+  const auto& P = adapter.covariance();
+  const auto& Q = adapter.filter().process_noise();
+
+  EXPECT_GT(P(State::kQsto1Index, State::kQsto1Index), P(State::kXIndex, State::kXIndex));
+  EXPECT_GT(P(State::kGscIndex, State::kGscIndex), P(State::kXIndex, State::kXIndex));
+  EXPECT_GT(Q(State::kQsto1Index, State::kQsto1Index), Q(State::kXIndex, State::kXIndex));
+  EXPECT_GT(Q(State::kGscIndex, State::kGscIndex), Q(State::kXIndex, State::kXIndex));
+}

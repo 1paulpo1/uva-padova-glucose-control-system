@@ -18,7 +18,7 @@ _crossval = Path(__file__).resolve().parent.parent.parent / "crossval"
 if str(_crossval) not in sys.path:
     sys.path.insert(0, str(_crossval))
 
-from analyze_results import (
+from validation.analyze_results import (
     load_results,
     precompute,
     filter_results,

@@ -21,7 +21,7 @@ CMakeFiles/
 
 # Validation output (generated)
 crossval/output/
-crossval_results_*.csv
+*.csv
 *.png
 validation/figures/*
 

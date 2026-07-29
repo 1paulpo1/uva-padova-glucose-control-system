@@ -14,7 +14,7 @@ namespace uva_padova {
 enum class ParamId : int {
   VG, k1, k2, VI, m1, m2, m4, kmax, kmin, kabs, kgri, f, b, d,
   kp1, kp2, kp3, ki, Fcns, Vm0, Vmx, Km0, p2U, r1, Gth,
-  ke1, ke2, ka1, ka2, kd,   Ts, BW, Gb, Ib,
+  ke1, ke2, ka1, ka2, kd, Ts, BW, Gb, Ib,
   HE_b, r2,
   COUNT
 };

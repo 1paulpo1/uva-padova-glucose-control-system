@@ -50,6 +50,7 @@ struct ParamDescriptor {
   double prior_std{2.0};
   double initial_val{1.0};
   bool fixed{false};
+  bool online_adaptive{false};
 };
 
 // ---------------------------------------------------------------------------

@@ -60,6 +60,10 @@ std::vector<ParamDescriptor> load_param_descriptors(const std::string& json_path
     if (init_it != item.end() && init_it->is_number())
       desc.initial_val = init_it->get<double>();
 
+    auto online_it = item.find("online");
+    if (online_it != item.end() && online_it->is_boolean())
+      desc.online_adaptive = online_it->get<bool>();
+
     descriptors.push_back(std::move(desc));
   }
 

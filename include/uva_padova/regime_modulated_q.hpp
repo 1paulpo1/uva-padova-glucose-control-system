@@ -17,7 +17,7 @@ namespace uva_padova {
 
 struct RegimeModulatedQ {
   static constexpr const char* meal_params[] = {
-    "kabs", "kmax", "kmin", "kgri", "f", nullptr
+    "kabs", nullptr // research: "kabs", "kmax", "kmin", "kgri", "f", nullptr
   };
 
   std::vector<double> active_meal_end_times;

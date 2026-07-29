@@ -174,8 +174,10 @@ struct ObservationCost : ceres::CostFunction {
     return true;
   }
 
-  // ---- Scalar cost (matches Ceres SoftLOneLoss on aggregate ||r||²) ----
-  // Returns √(1 + Σᵢ rᵢ²) − 1  — matches Ceres ½·SoftLOneLoss(||r||²).
+  // ---- Scalar cost (matches Ceres objective on aggregate ||r||²) ----
+  // Returns √(1 + Σᵢ rᵢ²) − 1, which is exactly the objective reported by
+  // Ceres in summary.final_cost for a single SoftLOneLoss-wrapped residual
+  // block with squared norm ||r||².
   double compute_scalar_cost(const double* params) const {
     eval_count_++;
     auto cgm = simulate_observations<double>(params);

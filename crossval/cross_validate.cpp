@@ -219,6 +219,8 @@ static json build_json_result(int pid, const IdentificationPipeline<>::Result& i
   // Covariance matrix
   if (ires.cov.rows() > 0 && ires.cov.cols() > 0)
     j["cov"] = eigen_to_json(ires.cov);
+  if (ires.cov_sandwich.rows() > 0 && ires.cov_sandwich.cols() > 0)
+    j["cov_sandwich"] = eigen_to_json(ires.cov_sandwich);
 
   // CGM residuals
   {

@@ -342,8 +342,15 @@ GateCResult diagnose_observability(
     return gate;
   }
 
-  // 2. FIM_obs = J_raw^T J_raw  (normalised observed Fisher Information)
+  // 2. FIM_obs = J_raw^T J_raw + Σ₀⁻¹
+  //    Gate C follows the full MAP curvature from the document, so weak
+  //    directions remain weak only if the data do not overcome the prior.
   Eigen::MatrixXd FIM = (J_raw.transpose() * J_raw).eval();
+  for (int i = 0; i < n_params; ++i) {
+    double prior_std = desc[i].prior_std;
+    if (prior_std > 0.0 && std::isfinite(prior_std))
+      FIM(i, i) += 1.0 / (prior_std * prior_std);
+  }
 
   // 3. Eigendecomposition (SelfAdjointEigenSolver sorts ascending)
   Eigen::SelfAdjointEigenSolver<Eigen::MatrixXd> eig(FIM);

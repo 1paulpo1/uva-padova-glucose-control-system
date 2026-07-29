@@ -289,6 +289,43 @@ TEST(CKFTest, MealPriorStoreBasic) {
   EXPECT_FALSE(store.get_prior(19.0 * 60.0, dinner_theta)); // 7 PM, no dinner prior stored
 }
 
+TEST(CKFTest, MealPriorStoreSeparatesBreakfastTimeContexts) {
+  MealPriorStore store;
+  std::vector<bool> is_meal = {true};
+
+  store.update_prior(5.5 * 60.0, {0.10}, is_meal);
+  store.update_prior(9.0 * 60.0, {0.50}, is_meal);
+
+  std::vector<double> early_theta;
+  std::vector<double> late_theta;
+  ASSERT_TRUE(store.get_prior(5.75 * 60.0, early_theta));
+  ASSERT_TRUE(store.get_prior(8.75 * 60.0, late_theta));
+
+  ASSERT_EQ(early_theta.size(), 1);
+  ASSERT_EQ(late_theta.size(), 1);
+  EXPECT_NEAR(early_theta[0], 0.10, 1e-6);
+  EXPECT_NEAR(late_theta[0], 0.50, 1e-6);
+}
+
+TEST(CKFTest, MealPriorStoreBoundsContextsPerMealType) {
+  MealPriorStore store;
+  store.max_contexts_per_type = 2;
+  std::vector<bool> is_meal = {true};
+
+  store.update_prior(5.5 * 60.0, {0.10}, is_meal);
+  store.update_prior(7.5 * 60.0, {0.20}, is_meal);
+  store.update_prior(9.5 * 60.0, {0.30}, is_meal);
+
+  EXPECT_EQ(store.size(), 2);
+
+  std::vector<double> theta_mid;
+  std::vector<double> theta_late;
+  ASSERT_TRUE(store.get_prior(7.5 * 60.0, theta_mid));
+  ASSERT_TRUE(store.get_prior(9.5 * 60.0, theta_late));
+  EXPECT_NEAR(theta_mid[0], 0.20, 1e-6);
+  EXPECT_NEAR(theta_late[0], 0.30, 1e-6);
+}
+
 // ===========================================================================
 //  Test SystemModel
 // ===========================================================================

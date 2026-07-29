@@ -32,6 +32,14 @@ static bool validate_jacobian(ObservationCost<Simulator>& obs_cost,
     if (!std::isfinite(jac_buf[i])) return false;
   return true;
 }
+
+static Eigen::MatrixXd prior_covariance(const PriorCost& prior_cost) {
+  const int dim = prior_cost.n_params_;
+  Eigen::MatrixXd cov = Eigen::MatrixXd::Zero(dim, dim);
+  for (int i = 0; i < dim; ++i)
+    cov(i, i) = prior_cost.stds_[i] * prior_cost.stds_[i];
+  return cov;
+}
 } // namespace detail
 
 // ===========================================================================
@@ -54,8 +62,11 @@ LMOptimizer::Result LMOptimizer::run(
   problem.AddResidualBlock(&prior_cost, nullptr, x.data());
 
   for (int i = 0; i < obs_cost.n_params_; ++i) {
-    problem.SetParameterLowerBound(x.data(), i, -3.0);
-    problem.SetParameterUpperBound(x.data(), i, 3.0);
+    const auto& pd = obs_cost.param_desc_[i];
+    const double lower = pd.prior_mean - 3.0 * pd.prior_std;
+    const double upper = pd.prior_mean + 3.0 * pd.prior_std;
+    problem.SetParameterLowerBound(x.data(), i, lower);
+    problem.SetParameterUpperBound(x.data(), i, upper);
   }
 
   ceres::Solver::Options options;
@@ -73,26 +84,20 @@ LMOptimizer::Result LMOptimizer::run(
   ceres::Solver::Summary summary;
   ceres::Solve(options, &problem, &summary);
 
-  Eigen::MatrixXd cov_matrix;
+  Eigen::MatrixXd cov_matrix = detail::prior_covariance(prior_cost);
   {
-    int dim = obs_cost.n_params_;
     // Do not enter the covariance path when Ceres already declared the
     // solution unusable. In that state SuiteSparse/CHOLMOD may fail during
     // factorisation even if a direct Jacobian probe later looks finite.
     bool jacobian_ok = detail::validate_jacobian(obs_cost, x);
-    if (!jacobian_ok || !summary.IsSolutionUsable()) {
-      cov_matrix = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
-    } else {
+    if (jacobian_ok && summary.IsSolutionUsable()) {
       ceres::Covariance::Options cov_options;
       cov_options.apply_loss_function = true;
       ceres::Covariance covariance(cov_options);
       std::vector<std::pair<const double*, const double*>> cov_blocks;
       cov_blocks.push_back({x.data(), x.data()});
       if (covariance.Compute(cov_blocks, &problem)) {
-        cov_matrix.resize(dim, dim);
         covariance.GetCovarianceBlock(x.data(), x.data(), cov_matrix.data());
-      } else {
-        cov_matrix = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
       }
     }
   }
@@ -126,7 +131,7 @@ LMOptimizer::CovarianceResult LMOptimizer::compute_covariance(
   tmp_problem.AddResidualBlock(&obs_cost, new ceres::SoftLOneLoss(1.0), x.data());
   tmp_problem.AddResidualBlock(&prior_cost, nullptr, x.data());
 
-  Eigen::MatrixXd cov_mat = Eigen::MatrixXd::Identity(dim, dim) * 1e12;
+  Eigen::MatrixXd cov_mat = detail::prior_covariance(prior_cost);
   bool jacobian_ok = detail::validate_jacobian(obs_cost, x);
   if (jacobian_ok) {
     ceres::Covariance::Options cov_opts;
@@ -246,8 +251,14 @@ auto IdentificationPipeline<CMAES, LM>::run(
   PriorCost prior_cost(param_desc);
 
   std::vector<double> initial_sigma(dim);
+  std::vector<double> lower_bounds(dim);
+  std::vector<double> upper_bounds(dim);
   for (int i = 0; i < dim; ++i)
     initial_sigma[i] = param_desc[i].prior_std;
+  for (int i = 0; i < dim; ++i) {
+    lower_bounds[i] = param_desc[i].prior_mean + cmaes_lower * param_desc[i].prior_std;
+    upper_bounds[i] = param_desc[i].prior_mean + cmaes_upper * param_desc[i].prior_std;
+  }
 
   double best_cma_cost = 1e20;
   std::vector<double> best_cma_point(dim, 0.0);
@@ -268,7 +279,7 @@ auto IdentificationPipeline<CMAES, LM>::run(
     typename CMAES::Result cmaes_res;
     try {
       cmaes_res = CMAES::run(fit_func, initial_sigma, cmaes_evals,
-                              seed, cmaes_lower, cmaes_upper);
+                             seed, lower_bounds, upper_bounds);
     } catch (const std::exception& e) {
       std::cerr << "  CMA-ES restart " << (restart + 1) << "/"
                 << n_cmaes_restarts << " threw: " << e.what() << "\n";
@@ -319,15 +330,18 @@ auto IdentificationPipeline<CMAES, LM>::run(
 
   if (result.success && !result.params.empty()) {
     int dim = obs_cost.n_params_;
+    auto cov_sandwich_res = LM::compute_covariance_at(result.params, obs_cost, prior_cost);
     if (lm_res.cov.rows() == dim && result.params == lm_res.final_params) {
       result.cov = lm_res.cov;
     } else {
       auto cov_res = LM::compute_covariance(result.params, obs_cost, prior_cost);
       result.cov = cov_res.cov;
     }
+    result.cov_sandwich = std::move(cov_sandwich_res.cov_sandwich);
     std::cout << "  [debug] covariance done\n";
+  } else {
+    result.cov_sandwich = Eigen::MatrixXd{};
   }
-  result.cov_sandwich = Eigen::MatrixXd{};
 
   return result;
 }

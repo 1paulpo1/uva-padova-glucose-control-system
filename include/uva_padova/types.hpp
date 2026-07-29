@@ -153,7 +153,7 @@ struct BasicParams {
   T kd{0.014};    // SC redistribution               [1/min]
 
   // --- CGM sensor [A24] ---
-  T Ts{12.0};     // sensor time constant            [min]
+  T Ts{15.0};     // sensor time constant            [min]
 
   // --- Subject ---
   T BW{75.0};     // body weight                     [kg]

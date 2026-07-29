@@ -100,6 +100,14 @@ struct MockLM {
     return {Eigen::MatrixXd::Identity(n, n), {}};
   }
 
+  static CovarianceResult compute_covariance_at(
+      const std::vector<double>& theta,
+      ObservationCost<>& /*obs_cost*/,
+      PriorCost& /*prior_cost*/) {
+    int n = static_cast<int>(theta.size());
+    return {Eigen::MatrixXd::Identity(n, n), Eigen::MatrixXd::Identity(n, n)};
+  }
+
   static void reset() {
     next_params.clear();
     next_cost = 0.0;
@@ -133,6 +141,8 @@ TEST(PipelineMockTest, selects_best_restart) {
   EXPECT_DOUBLE_EQ(result.all_restarts[0].cost, 10.0);
   EXPECT_DOUBLE_EQ(result.all_restarts[1].cost, 5.0);
   EXPECT_DOUBLE_EQ(result.all_restarts[2].cost, 8.0);
+  EXPECT_EQ(result.cov_sandwich.rows(), 2);
+  EXPECT_EQ(result.cov_sandwich.cols(), 2);
 }
 
 TEST(PipelineMockTest, all_restarts_fail) {

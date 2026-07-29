@@ -1,5 +1,5 @@
 {
-  "description": "Greedy-5 fixed only (Km0, VI, BW, Fcns, Ib). Dormant (b, d, r1, Gth) freed → 29 active params. Tests structural non-identifiability prediction.",
+  "description": "Legacy broad identifiability stress config: Greedy-5 fixed plus kp3 fixed per main doc; 28 active params remain.",
   "model": "t1dm",
   "parameters": [
     { "name": "VG",    "prior_std": 1.0 },
@@ -18,7 +18,7 @@
     { "name": "d",     "prior_std": 1.0 },
     { "name": "kp1",   "prior_std": 1.0 },
     { "name": "kp2",   "prior_std": 1.0 },
-    { "name": "kp3",   "prior_std": 1.0 },
+    { "name": "kp3",   "fixed": true },
     { "name": "ki",    "prior_std": 1.0 },
     { "name": "Fcns",  "fixed": true },
     { "name": "Vm0",   "prior_std": 1.0 },

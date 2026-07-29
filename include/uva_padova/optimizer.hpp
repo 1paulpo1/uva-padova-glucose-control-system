@@ -23,6 +23,13 @@ struct CMAESOptimizer {
                     int seed = -1,
                     double lower_bound = -3.0,
                     double upper_bound = 3.0);
+
+  static Result run(std::function<double(const double*, int)> fit_func,
+                    const std::vector<double>& initial_sigma,
+                    int max_evals,
+                    int seed,
+                    const std::vector<double>& lower_bounds,
+                    const std::vector<double>& upper_bounds);
 };
 
 // ---------------------------------------------------------------------------
@@ -35,7 +42,7 @@ struct LMOptimizer {
     int n_iters{0};
     bool converged{false};
     Eigen::MatrixXd cov;           // posterior covariance via Ceres (loss-weighted)
-    Eigen::MatrixXd cov_sandwich;  // retained for reference; unused in auto-mode
+    Eigen::MatrixXd cov_sandwich;  // robust covariance via sandwich estimator
   };
 
   struct CovarianceResult {
@@ -80,7 +87,7 @@ struct IdentificationPipeline {
     int total_evals{0};
     bool success{false};
     Eigen::MatrixXd cov;           // posterior covariance from Ceres (loss-weighted)
-    Eigen::MatrixXd cov_sandwich;  // retained for reference; unused in auto-mode
+    Eigen::MatrixXd cov_sandwich;  // robust covariance via sandwich estimator
     std::vector<RestartRecord> all_restarts;  // best point from each CMA-ES restart
 
     // CMA-ES vs LM breakdown

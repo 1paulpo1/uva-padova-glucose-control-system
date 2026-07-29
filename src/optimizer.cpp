@@ -7,6 +7,7 @@
 #include <cmath>
 #include <iostream>
 #include <random>
+#include <stdexcept>
 
 #include <Eigen/Dense>
 #include <ceres/ceres.h>
@@ -25,6 +26,27 @@ CMAESOptimizer::Result CMAESOptimizer::run(
     double upper_bound)
 {
   int dim = static_cast<int>(initial_sigma.size());
+  return run(std::move(fit_func),
+             initial_sigma,
+             max_evals,
+             seed,
+             std::vector<double>(dim, lower_bound),
+             std::vector<double>(dim, upper_bound));
+}
+
+CMAESOptimizer::Result CMAESOptimizer::run(
+    std::function<double(const double*, int)> fit_func,
+    const std::vector<double>& initial_sigma,
+    int max_evals,
+    int seed,
+    const std::vector<double>& lower_bounds,
+    const std::vector<double>& upper_bounds)
+{
+  int dim = static_cast<int>(initial_sigma.size());
+  if (static_cast<int>(lower_bounds.size()) != dim ||
+      static_cast<int>(upper_bounds.size()) != dim) {
+    throw std::invalid_argument("CMAESOptimizer::run: bounds size mismatch");
+  }
 
   std::vector<double> sigma_vec = initial_sigma;
 
@@ -32,8 +54,8 @@ CMAESOptimizer::Result CMAESOptimizer::run(
     seed = static_cast<int>(std::random_device{}());
 
   std::vector<double> x0(dim, 0.0);
-  std::vector<double> lbounds(dim, lower_bound);
-  std::vector<double> ubounds(dim, upper_bound);
+  std::vector<double> lbounds = lower_bounds;
+  std::vector<double> ubounds = upper_bounds;
 
   uint64_t rng_seed = static_cast<uint64_t>(seed);
   libcmaes::CMAParameters<> cmap(x0, sigma_vec, -1,

@@ -520,7 +520,7 @@ static void print_help(const char* prog) {
             << "  --help              Show this message\n\n"
             << "Configuration file:\n"
             << "  --config FILE       Load JSON config file (overlaid before presets & flags)\n"
-            << "  --params-config FILE  JSON parameter descriptors (default: config/default_params.json)\n\n"
+            << "  --params-config FILE  JSON parameter descriptors (default: config/default_config_5_active.json)\n\n"
             << "Noise preset (overrides CGM + meal sections):\n"
             << "  --noise-preset NAME  " << kPresetHelp.at("cgm") << "\n";
   print_presets();

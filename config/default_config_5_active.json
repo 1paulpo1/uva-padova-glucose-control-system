@@ -1,10 +1,10 @@
 {
-    "description": "Only 5 params active: VG, k2, kabs, kp1, kp2. Ultra-narrow testing",
+    "description": "Default bootstrap config: 4 params active: VG, kabs, kp1, kp2",
     "model": "t1dm",
     "parameters": [
       { "name": "VG",    "prior_std": 3.0 },
       { "name": "k1",    "fixed": true },
-      { "name": "k2",    "prior_std": 3.0 },
+      { "name": "k2",    "fixed": true },
       { "name": "VI",    "fixed": true },
       { "name": "m1",    "fixed": true },
       { "name": "m2",    "fixed": true },

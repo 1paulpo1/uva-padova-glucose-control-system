@@ -54,6 +54,22 @@ inline ParamId param_id_from_string(const std::string& name) {
 // ---------------------------------------------------------------------------
 template<typename T>
 struct BasicState {
+  static constexpr int kGpIndex = 0;
+  static constexpr int kGtIndex = 1;
+  static constexpr int kQsto1Index = 2;
+  static constexpr int kQsto2Index = 3;
+  static constexpr int kQgutIndex = 4;
+  static constexpr int kIpIndex = 5;
+  static constexpr int kIiIndex = 6;
+  static constexpr int kIsc1Index = 7;
+  static constexpr int kIsc2Index = 8;
+  static constexpr int kIPrimeIndex = 9;
+  static constexpr int kXlIndex = 10;
+  static constexpr int kXIndex = 11;
+  static constexpr int kGscIndex = 12;
+  static constexpr int kMealDIndex = 13;
+  static constexpr int kSize = 14;
+
   T Gp{0};      // plasma glucose mass          [mg/kg]
   T Gt{0};      // tissue glucose mass          [mg/kg]
   T Qsto1{0};   // stomach solid phase          [mg]
@@ -71,8 +87,6 @@ struct BasicState {
 
   T& at(int i);
   const T& at(int i) const;
-
-  static constexpr int kSize = 14;
 
   // Runtime checks — only meaningful for double
   bool all_finite() const;

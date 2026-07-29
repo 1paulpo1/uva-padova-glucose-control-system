@@ -205,8 +205,8 @@ struct UvaPadovaODESystem {
 
   template<typename T>
   static T risk_function(const T& G_mgdl, const T& Gb,
-                          const T& Gth, const T& r1) {
-    return risk_factor(G_mgdl, Gb, Gth, r1);
+                          const T& Gth, const T& r1, const T& r2) {
+    return risk_factor(G_mgdl, Gb, Gth, r1, r2);
   }
 
   template<typename T>

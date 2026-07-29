@@ -228,7 +228,7 @@ static void print_help(const char* prog) {
             << "  --json FILE     Output JSON path (default: result.json)\n"
             << "\n"
             << "Parameter config:\n"
-            << "  --params-config FILE  Parameter descriptor JSON (default: " UVA_PADOVA_CONFIG_DIR "/default_params.json)\n"
+            << "  --params-config FILE  Parameter descriptor JSON (default: " UVA_PADOVA_CONFIG_DIR "/default_config_5_active.json)\n"
             << "\n"
             << "Optimizer:\n"
             << "  --restarts N    CMA-ES restarts (default: 3)\n"
@@ -303,7 +303,7 @@ int main(int argc, char* argv[]) {
 
   // ---- Load parameter descriptors ----
   std::string config_path = params_config_path.empty()
-    ? UVA_PADOVA_CONFIG_DIR "/default_params.json"
+    ? UVA_PADOVA_CONFIG_DIR "/default_config_5_active.json"
     : params_config_path;
 
   auto all_desc = load_param_descriptors(config_path);

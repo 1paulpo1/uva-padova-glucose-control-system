@@ -61,7 +61,7 @@ static void print_help(const char* prog) {
             << "  --seed N            Base random seed (default: 42)\n"
             << "  --verbose           Show Ceres output during LM\n"
             << "  --json FILE         Output JSON path (default: topology_results.json)\n"
-            << "  --params-config FILE  JSON param descriptors (default: config/default_params.json)\n"
+            << "  --params-config FILE  JSON param descriptors (default: config/default_config_5_active.json)\n"
             << "  --help              Show this message\n\n"
             << "Multi-start:\n"
             << "  --starts N          Number of LM runs per patient (default: 200)\n"

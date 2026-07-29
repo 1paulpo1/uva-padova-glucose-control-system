@@ -505,7 +505,7 @@ TEST(CKFTest, OnlineObservabilityWithSystemModel) {
     {"kp1", false, -0.5, 0.5},
   };
   int n_theta = static_cast<int>(desc.size());
-  int dim = 14 + n_theta;
+  int dim = State::kSize + n_theta;
 
   OnlineObservability obs(dim);
   obs.window_length = 3;
@@ -517,16 +517,16 @@ TEST(CKFTest, OnlineObservabilityWithSystemModel) {
   {
     BasicParams<double> p = params;
     UvaPadovaSimulator::find_steady_state(ss, p, p.Gb);
-    for (int i = 0; i < 14; ++i)
+    for (int i = 0; i < State::kSize; ++i)
       x0(i) = ss.at(i);
     for (int i = 0; i < n_theta; ++i)
-      x0(14 + i) = 0.0;
+      x0(State::kSize + i) = 0.0;
   }
 
   // Simulate a meal: set Qsto1 and mealD
   Eigen::VectorXd x = x0;
-  x(2) += 90000.0;  // Qsto1: 90g CHO
-  x(13) = 90000.0;  // mealD
+  x(State::kQsto1Index) += 90000.0;  // Qsto1: 90g CHO
+  x(State::kMealDIndex) = 90000.0;   // mealD
 
   // Push several Jacobians along the meal trajectory
   // (simulating the system dynamics advancing)

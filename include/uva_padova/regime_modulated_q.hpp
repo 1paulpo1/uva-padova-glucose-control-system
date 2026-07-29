@@ -62,7 +62,7 @@ struct RegimeModulatedQ {
     bool have_scores = obs_scores_.size() == Q_nominal_.rows();
 
     for (int i = 0; i < n_theta_; ++i) {
-      int idx = 14 + i;
+      int idx = State::kSize + i;
 
       if (!have_scores) {
         if (is_meal_param_[i] && !in_window)

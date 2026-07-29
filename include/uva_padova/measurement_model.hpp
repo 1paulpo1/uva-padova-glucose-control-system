@@ -2,6 +2,8 @@
 
 #include <Eigen/Dense>
 
+#include "uva_padova/types.hpp"
+
 namespace uva_padova {
 
 // ===========================================================================
@@ -15,7 +17,7 @@ struct MeasurementModel {
 
   Eigen::VectorXd operator()(const Eigen::VectorXd& x_aug) const {
     Eigen::VectorXd z(1);
-    z(0) = x_aug(12); // Gsc at index 12 in BasicState order
+    z(0) = x_aug(State::kGscIndex);
     return z;
   }
 

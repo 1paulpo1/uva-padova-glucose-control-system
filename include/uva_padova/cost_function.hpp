@@ -46,9 +46,9 @@ struct IdentificationData {
 // ---------------------------------------------------------------------------
 struct ParamDescriptor {
   std::string name;
-  double prior_mean{1.0};
+  double prior_mean{0.0};
   double prior_std{2.0};
-  double initial_val{1.0};
+  double initial_val{0.0};
   bool fixed{false};
   bool online_adaptive{false};
 };

@@ -7,7 +7,7 @@
 //
 // NOTE: This test uses a 3-param subset (kp2, Vm0, p2U) for speed.
 // The full 21-param configuration (all params except greedy-5 fixed set)
-// is defined in config/default_params.json.
+// is not represented by the current default test config.
 // =============================================================================
 
 #include <iostream>

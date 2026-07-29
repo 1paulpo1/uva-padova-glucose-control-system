@@ -17,15 +17,16 @@ namespace uva_padova {
 // }
 // All fields except "name" are optional:
 //   - fixed:       bool, default false
-//   - prior_mean:  double (log-space), default 1.0 (i.e. log(1)=0 for identity multiplier)
+//   - prior_mean:  double (log-space), default 0.0 (i.e. log(1)=0 for identity multiplier)
 //   - prior_std:   double (log-space), default 2.0
-//   - initial:     double (log-space), default 1.0
+//   - initial:     double (log-space), default 0.0
+//   - online:      bool, default false
 std::vector<ParamDescriptor> load_param_descriptors(const std::string& json_path);
 
 // Return only non-fixed descriptors (for building the optimisation theta vector).
 std::vector<ParamDescriptor> active_descriptors(const std::vector<ParamDescriptor>& all);
 
-// Load the default configuration (default_params.json in the config directory).
+// Load the default configuration (default_config_5_active.json in the config directory).
 // Returns an empty vector if the file cannot be found.
 std::vector<ParamDescriptor> load_default_param_descriptors();
 

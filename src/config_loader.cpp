@@ -81,7 +81,7 @@ std::vector<ParamDescriptor> active_descriptors(const std::vector<ParamDescripto
 
 std::vector<ParamDescriptor> load_default_param_descriptors() {
   std::string config_dir = UVA_PADOVA_CONFIG_DIR;
-  std::string default_path = config_dir + "/default_params.json";
+  std::string default_path = config_dir + "/default_config_5_active.json";
   return load_param_descriptors(default_path);
 }
 

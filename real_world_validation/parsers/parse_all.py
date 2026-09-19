@@ -2,11 +2,11 @@
 """
 Parse ALL patients from parquet, filter by quality, group by study.
 
-Output: validation/datasets/<study_name>/patient{id}_{ndays}d_*.csv
+Output: real_world_validation/datasets/<study_name>/patient{id}_{ndays}d_*.csv
 
 Usage:
     python -m parsers.parse_all
-    python -m parsers.parse_all --parquet <path> --out validation/datasets/
+    python -m parsers.parse_all --parquet <path> --out real_world_validation/datasets/
     python -m parsers.parse_all --days 7 --limit 100 --no-cache
 """
 
@@ -24,7 +24,7 @@ from .base_parser import BaseParser
 
 DEFAULT_PARQUET = os.environ.get(
     "UVA_PADOVA_PARQUET",
-    r"C:\Users\beleg\Downloads\metabonet_public.parquet",
+    r"os.path.join(os.path.expanduser("~"), "Downloads", "metabonet_public.parquet")",
 )
 
 
@@ -35,7 +35,7 @@ def main():
     ap.add_argument("--study", default=None,
                     help="Filter by study name (e.g. Flair, Loop)")
     ap.add_argument("--out", default=None,
-                    help="Output directory (default: validation/datasets/)")
+                    help="Output directory (default: real_world_validation/datasets/)")
     ap.add_argument("--days", type=int, default=0,
                     help="Window in days (0 = all available data)")
     ap.add_argument("--min-meals-per-day", type=float, default=1.0)
@@ -45,7 +45,7 @@ def main():
                     help="Max patients to process (0 = all)")
     args = ap.parse_args()
 
-    # validation/ (two levels up from this file inside parsers/)
+    # real_world_validation/ (two levels up from this file inside parsers/)
     script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     output_dir = args.out or os.path.join(script_dir, "datasets")
     os.makedirs(output_dir, exist_ok=True)

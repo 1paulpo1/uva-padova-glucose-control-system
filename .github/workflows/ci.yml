@@ -1,0 +1,67 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-14]
+      fail-fast: false
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          lfs: false
+          fetch-depth: 1
+
+      - name: Install deps (Ubuntu)
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libeigen3-dev libceres-dev libgoogle-glog-dev libgflags-dev libgtest-dev libcmaes-dev nlohmann-json3-dev libboost-all-dev cmake ninja-build
+          # libcmaes may be missing on some images — build from source as fallback
+          if ! ldconfig -p | grep -q libcmaes; then
+            git clone --depth 1 https://github.com/CMA-ES/libcmaes.git /tmp/libcmaes
+            cmake -S /tmp/libcmaes -B /tmp/libcmaes/build -DCMAKE_BUILD_TYPE=Release -DLIBCMAES_BUILD_EXAMPLES=OFF -DLIBCMAES_BUILD_TESTS=OFF
+            sudo cmake --build /tmp/libcmaes/build -j
+            sudo cmake --install /tmp/libcmaes/build
+          fi
+
+      - name: Install deps (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: |
+          brew update
+          brew install eigen ceres-solver gflags glog googletest nlohmann-json boost cmaes 2>&1 | tail -n 30
+          # matplotplusplus optional
+          brew install matplotplusplus || true
+
+      - name: Configure
+        run: cmake -B build -DCMAKE_BUILD_TYPE=Release -G Ninja
+
+      - name: Build
+        run: cmake --build build -j
+
+      - name: Test
+        run: ctest --test-dir build --output-on-failure
+
+      - name: Smoke synthetic (3 patients, 200 evals)
+        run: |
+          ./build/synthetic_study/cross_validate --patients 3 --seed 42 --evals 200 --noise-preset cgm --json /tmp/synth_smoke.json
+          python3 synthetic_study/analyze_results.py --json /tmp/synth_smoke.json --out /tmp/figs --no-plots || true
+          cat /tmp/synth_smoke.json | head -n 30
+
+      - name: Upload smoke artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-${{ matrix.os }}
+          path: |
+            /tmp/synth_smoke.json
+            /tmp/figs/
+          if-no-files-found: ignore

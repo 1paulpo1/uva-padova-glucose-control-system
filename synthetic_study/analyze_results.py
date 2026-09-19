@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Analyze cross-validation results from cross_validate.
+Analyze synthetic identifiability results from cross_validate (virtual patients).
 Usage: python3 analyze_results.py [--json crossval_results.json]
 """
 
@@ -987,8 +987,8 @@ PLOT_REGISTRY = {
 
 def main():
     parser = argparse.ArgumentParser(description="Analyze cross-validation results")
-    parser.add_argument("--json", default="crossval_results.json",
-                        help="Path to crossval JSON (default: crossval_results.json)")
+    parser.add_argument("--json", default="synthetic_results.json",
+                        help="Path to synthetic study JSON (default: synthetic_results.json, alias crossval_results.json)")
     parser.add_argument("--out", default=".",
                         help="Output directory for plots (default: current dir)")
     parser.add_argument("--no-plots", action="store_true",

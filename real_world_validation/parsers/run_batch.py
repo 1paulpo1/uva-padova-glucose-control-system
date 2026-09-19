@@ -50,7 +50,7 @@ def cmd_scan(args):
         print(f"  Filtering study: {args.study}")
 
     sig = None if args.no_cache else BaseParser._parquet_signature(args.source)
-    # validation/ (two levels up from this file inside parsers/)
+    # real_world_validation/ (two levels up from this file inside parsers/)
     script_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     output_dir = args.output_dir or os.path.join(script_dir, "datasets")
     patients = (None if args.no_cache

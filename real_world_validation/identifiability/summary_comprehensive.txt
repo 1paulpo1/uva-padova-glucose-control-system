@@ -135,7 +135,7 @@
 
 ── P8: IDENTIFIABLE FUNCTIONS ──
 
-  P8a: Glucose core identifiable functions (from C:\Users\beleg\OneDrive\Documents\uva-padova-cpp\validation\identifiability):
+  P8a: Glucose core identifiable functions (from real_world_validation/identifiability):
     [1]  kp2
     [2]  k2
     [3]  k1

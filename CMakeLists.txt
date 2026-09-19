@@ -7,11 +7,18 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 
 find_package(Eigen3 REQUIRED)
 
-# Use shared gflags to avoid duplicate static registrations
-if(EXISTS /opt/homebrew/Cellar/gflags/2.3.0/lib/cmake/gflags)
-  set(gflags_DIR /opt/homebrew/Cellar/gflags/2.3.0/lib/cmake/gflags CACHE PATH "Path to gflags CMake config")
+# gflags: allow override via gflags_DIR; Ceres will find it transitively.
+# No hard-coded Homebrew paths — works on Linux, macOS (brew --prefix), and CI.
+find_package(gflags QUIET)
+if(NOT gflags_FOUND)
+  # Try common Homebrew locations without hard-coding version
+  foreach(_brew_prefix "/opt/homebrew" "/usr/local" "/opt/local")
+    if(EXISTS "${_brew_prefix}/include/gflags/gflags.h")
+      list(APPEND CMAKE_PREFIX_PATH "${_brew_prefix}")
+    endif()
+  endforeach()
+  find_package(gflags REQUIRED)
 endif()
-find_package(gflags REQUIRED)
 # Create alias so Ceres' interface dependency finds `gflags` target
 if(NOT TARGET gflags)
   foreach(_candidate gflags_shared gflags_static gflags::gflags_shared gflags::gflags_static)
@@ -64,10 +71,10 @@ target_include_directories(uva_padova_core
 )
 
 # unscented (UKF) library — optional, see https://github.com/kam3k/unscented
-if(EXISTS /opt/homebrew/include/unscented)
-  target_include_directories(uva_padova_core PUBLIC /opt/homebrew/include/unscented)
-elseif(EXISTS /mingw64/include/unscented)
-  target_include_directories(uva_padova_core PUBLIC /mingw64/include/unscented)
+# Portable: check via CMAKE_PREFIX_PATH instead of hard-coded /opt/homebrew or /mingw64
+find_path(UNSCENTED_INCLUDE_DIR NAMES unscented/unscented.h PATH_SUFFIXES include)
+if(UNSCENTED_INCLUDE_DIR)
+  target_include_directories(uva_padova_core PUBLIC ${UNSCENTED_INCLUDE_DIR})
 endif()
 
 target_link_libraries(uva_padova_core
@@ -85,8 +92,6 @@ target_include_directories(uva_padova_id
   PUBLIC
     include
     ${EIGEN3_INCLUDE_DIR}
-  PRIVATE
-    /opt/homebrew/include
 )
 
 target_link_libraries(uva_padova_id
@@ -136,8 +141,8 @@ target_compile_options(uva_padova_id PRIVATE -Wall -Wextra -Wpedantic)
 # Tests
 add_subdirectory(tests)
 
-# Validation (CSV output, plotted via Python)
-add_subdirectory(validation)
+# Real-world validation (CGM data from T1DEXI / OhioT1DM)
+add_subdirectory(real_world_validation)
 
-# Cross-validation
-add_subdirectory(crossval)
+# Synthetic identifiability study (virtual patients from the simulator itself)
+add_subdirectory(synthetic_study)

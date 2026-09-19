@@ -192,9 +192,10 @@ class StudyScheduler:
 # PipelineOrchestrator — executes RunSpecs in progressive batches
 # ══════════════════════════════════════════════════════════════════════════════
 
-_MINGW_BIN = r"C:\msys64\mingw64\bin"
+_MINGW_BIN = os.environ.get("MINGW_BIN", r"C:\msys64\mingw64\bin") if os.name == "nt" else ""
 _SUBPROCESS_ENV = os.environ.copy()
-_SUBPROCESS_ENV["PATH"] = f"{_MINGW_BIN};{_SUBPROCESS_ENV.get('PATH', '')}"
+if _MINGW_BIN:
+    _SUBPROCESS_ENV["PATH"] = f"{_MINGW_BIN}{os.pathsep}{_SUBPROCESS_ENV.get('PATH', '')}"
 
 
 def _make_timestamp() -> str:

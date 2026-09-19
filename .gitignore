@@ -3,6 +3,9 @@ build/
 build_noasan/
 cmake-build-*/
 Testing/
+CMakeFiles/
+_build/
+out/
 
 # IDE
 .idea/
@@ -17,16 +20,52 @@ Testing/
 # OS
 .DS_Store
 Thumbs.db
-CMakeFiles/
 
-# Validation output (generated)
+# Large result artifacts — generated, not for git (see ~/Documents/uva-padova-archive-local-backup)
+# Synthetic study (virtual patients) — hours to recompute, archived locally
+synthetic_study/**/crossval_results*.json
+synthetic_study/**/crossval_results*.csv
+synthetic_study/**/100-*.json
+synthetic_study/output/
+# Keep portfolio composites (small PNGs ~900KB) — allow explicitly:
+!synthetic_study/composite/
+!synthetic_study/composite/*.png
+online_exp*.json
+online_glucose*.json
+# Keep small test fixtures (online_test*.json ~300KB) tracked as examples — uncomment to ignore:
+# online_test*.json
+# preset_*.json — small scenario configs, keep tracked
+
+# Real-world validation outputs (real patient data — privacy + size)
+real_world_validation/datasets/
+real_world_validation/output/
+real_world_validation/figures/
+real_world_validation/validation_results*.json
+real_world_validation/validation_results*.csv
+
+# Legacy paths (kept for backward compatibility — now renamed)
 crossval/output/
+validation/figures/
+
+# Profiling / analysis outputs (ignore generated CSV/PNG by default)
 *.csv
 *.png
-validation/figures/*
-
+!config/**/*.csv
+!real_world_validation/identifiability/**/*.csv
+!synthetic_study/composite/*.png
+!synthetic_study/**/*.csv
+# Keep small example CSVs explicitly if needed via git add -f
 
 # Python
 __pycache__/
 *.pyc
 .venv/
+*.egg-info/
+.pytest_cache/
+
+# Secrets / local config
+.env
+.env.local
+
+# Archive backup (local only, not for git)
+uva-padova-archive-local-backup/

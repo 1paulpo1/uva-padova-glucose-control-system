@@ -1,0 +1,19 @@
+cff-version: 1.2.0
+title: UVA-Padova Glucose Control System
+message: If you use this software, please cite it as below.
+type: software
+authors:
+  - family-names: Po
+    given-names: Paul
+    orcid: https://orcid.org/0009-0000-0000-0000
+license: MIT
+repository-code: https://github.com/1paulpo1/uva-padova-glucose-control-system
+keywords:
+  - diabetes
+  - glucose
+  - UVA-Padova
+  - identifiability
+  - CKF
+abstract: Personalized glucose prediction from the UVA-Padova model (Dalla Man) with offline CMA-ES→LM identification and experimental CKF online adaptation. Structural and practical identifiability by a single CGM channel is studied.
+version: 0.1.0-experimental
+date-released: 2026-09-19

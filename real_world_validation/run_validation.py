@@ -8,9 +8,9 @@ Design:
   Early-stop if gates fail systematically.
 
 Usage:
-    python validation/run_validation.py
-    python validation/run_validation.py --study Loop --batch-start 5 --max-patients 50
-    python validation/run_validation.py --resume validation_results.json
+    python real_world_validation/run_validation.py
+    python real_world_validation/run_validation.py --study Loop --batch-start 5 --max-patients 50
+    python real_world_validation/run_validation.py --resume validation_results.json
 """
 
 import argparse
@@ -26,7 +26,7 @@ from batch_runner import StudyScheduler, PipelineOrchestrator
 
 DEFAULT_PARQUET = os.environ.get(
     "UVA_PADOVA_PARQUET",
-    r"C:\Users\beleg\Downloads\metabonet_public.parquet",
+    os.path.join(os.path.expanduser("~"), "Downloads", "metabonet_public.parquet"),
 )
 
 
@@ -45,7 +45,7 @@ def main():
     ap.add_argument("--study", default=None)
     ap.add_argument("--output-dir", default=None)
     ap.add_argument("--test-real-data", default=None,
-                    help="Path to test_real_data.exe")
+                    help="Path to test_real_data")
     ap.add_argument("--resume", default=None,
                     help="Path to existing results JSON (not yet supported in batch_runner)")
     ap.add_argument("--batch-start", type=int, default=5)
@@ -95,7 +95,7 @@ def main():
     output_dir.mkdir(parents=True, exist_ok=True)
 
     test_real_path = args.test_real_data or (
-        script_dir.parent / "build" / "validation" / "test_real_data.exe")
+        script_dir.parent / "build" / "real_world_validation" / "test_real_data")
     test_real_path = Path(test_real_path)
     if not test_real_path.exists():
         print(f"Error: test_real_data not found at {test_real_path}")

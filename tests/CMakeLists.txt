@@ -8,7 +8,6 @@ add_executable(unit_core
 )
 target_link_libraries(unit_core PRIVATE uva_padova_core Ceres::ceres GTest::gtest GTest::gtest_main)
 target_include_directories(unit_core PRIVATE ${CMAKE_SOURCE_DIR}/tests)
-target_link_options(unit_core PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
 # ===========================================================================
 # Integration tests for identification library (with real ODE)
@@ -18,7 +17,6 @@ add_executable(unit_id
 )
 target_link_libraries(unit_id PRIVATE uva_padova_id GTest::gtest GTest::gtest_main)
 target_include_directories(unit_id PRIVATE ${CMAKE_SOURCE_DIR}/tests)
-target_link_options(unit_id PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
 # ===========================================================================
 # Unit tests for optimizer module (CMAESOptimizer, LMOptimizer, Pipeline)
@@ -28,7 +26,6 @@ add_executable(test_optimizer
 )
 target_link_libraries(test_optimizer PRIVATE uva_padova_id GTest::gtest GTest::gtest_main)
 target_include_directories(test_optimizer PRIVATE ${CMAKE_SOURCE_DIR}/tests)
-target_link_options(test_optimizer PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
 # ===========================================================================
 # Register gtest-based tests with CTest
@@ -41,8 +38,8 @@ add_executable(test_ckf
 )
 target_link_libraries(test_ckf PRIVATE uva_padova_online GTest::gtest GTest::gtest_main)
 target_include_directories(test_ckf PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_options(test_ckf PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
+# Note: no hard-coded rpath — use CMAKE_INSTALL_RPATH or conda activation instead
 include(GoogleTest)
 gtest_discover_tests(unit_core)
 gtest_discover_tests(test_ckf)
@@ -55,12 +52,10 @@ gtest_discover_tests(test_optimizer)
 add_executable(test_odesystem test_odesystem.cpp)
 target_link_libraries(test_odesystem PRIVATE uva_padova_core GTest::gtest GTest::gtest_main)
 target_include_directories(test_odesystem PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_options(test_odesystem PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
 add_executable(test_identification integration/identification_pipeline_test.cpp)
 target_link_libraries(test_identification PRIVATE uva_padova_id GTest::gtest GTest::gtest_main)
 target_include_directories(test_identification PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_options(test_identification PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
 gtest_discover_tests(test_odesystem)
 gtest_discover_tests(test_identification)
@@ -81,6 +76,5 @@ add_executable(test_recovery
 )
 target_link_libraries(test_recovery PRIVATE uva_padova_id GTest::gtest GTest::gtest_main)
 target_include_directories(test_recovery PRIVATE ${CMAKE_SOURCE_DIR}/include)
-target_link_options(test_recovery PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
 
 gtest_discover_tests(test_recovery)

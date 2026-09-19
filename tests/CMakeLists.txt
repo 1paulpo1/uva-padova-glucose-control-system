@@ -39,7 +39,6 @@ add_executable(test_ckf
 target_link_libraries(test_ckf PRIVATE uva_padova_online GTest::gtest GTest::gtest_main)
 target_include_directories(test_ckf PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
-# Note: no hard-coded rpath — use CMAKE_INSTALL_RPATH or conda activation instead
 include(GoogleTest)
 gtest_discover_tests(unit_core)
 gtest_discover_tests(test_ckf)
@@ -78,3 +77,13 @@ target_link_libraries(test_recovery PRIVATE uva_padova_id GTest::gtest GTest::gt
 target_include_directories(test_recovery PRIVATE ${CMAKE_SOURCE_DIR}/include)
 
 gtest_discover_tests(test_recovery)
+
+# Portable rpath: only add conda/lib rpath if it exists (macOS anaconda fallback)
+# On CI (Ubuntu/macOS brew) GTest is in system path and needs no rpath.
+if(EXISTS "/opt/anaconda3/lib/libgtest_main.dylib" OR EXISTS "/opt/anaconda3/lib/libgtest_main.so")
+  foreach(_tgt unit_core unit_id test_optimizer test_ckf test_odesystem test_identification test_recovery)
+    if(TARGET ${_tgt})
+      target_link_options(${_tgt} PRIVATE -Wl,-rpath,/opt/anaconda3/lib)
+    endif()
+  endforeach()
+endif()

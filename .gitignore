@@ -53,8 +53,7 @@ validation/figures/
 !config/**/*.csv
 !real_world_validation/identifiability/**/*.csv
 !synthetic_study/composite/*.png
-!synthetic_study/**/*.csv
-# Keep small example CSVs explicitly if needed via git add -f
+# Keep small example CSVs explicitly if needed via git add -f (do not blanket un-ignore synthetic_study CSVs — they are large results)
 
 # Python
 __pycache__/

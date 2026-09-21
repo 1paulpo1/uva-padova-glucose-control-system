@@ -8,6 +8,8 @@ import json
 import sys
 import os
 import argparse
+import contextlib
+import io
 import logging
 
 try:
@@ -19,6 +21,29 @@ try:
 except ImportError:
     logging.error("ERROR: install numpy + matplotlib: pip install numpy matplotlib")
     sys.exit(1)
+
+
+@contextlib.contextmanager
+def _quiet_import():
+    """Silence stderr (Python- and C-level) during an optional import.
+
+    Broken third-party combos (e.g. packages built for NumPy 1.x running
+    under NumPy 2.x) print full tracebacks from inside their own import
+    handlers *before* our except fires. Suppressing fd 2 around the import
+    keeps that noise out of the analysis log; our own warning below still
+    reports the failure reason.
+    """
+    devnull_fd = os.open(os.devnull, os.O_WRONLY)
+    saved_fd = os.dup(2)
+    try:
+        os.dup2(devnull_fd, 2)
+        with contextlib.redirect_stdout(io.StringIO()), \
+             contextlib.redirect_stderr(io.StringIO()):
+            yield
+    finally:
+        os.dup2(saved_fd, 2)
+        os.close(saved_fd)
+        os.close(devnull_fd)
 
 
 def load_results(json_path: str) -> dict:
@@ -332,8 +357,9 @@ def plot_pca_tsne(data: dict, out_dir: str):
         return
 
     try:
-        from sklearn.decomposition import PCA
-        from sklearn.manifold import TSNE
+        with _quiet_import():
+            from sklearn.decomposition import PCA
+            from sklearn.manifold import TSNE
     except Exception as e:
         # Broad catch: broken envs (e.g. sklearn built for NumPy 1.x running
         # under NumPy 2.x) raise AttributeError/ImportError at import time.
@@ -440,7 +466,8 @@ def plot_pca_with_true(data: dict, out_dir: str):
         return
 
     try:
-        from sklearn.decomposition import PCA
+        with _quiet_import():
+            from sklearn.decomposition import PCA
     except Exception as e:
         # Broad catch: broken envs (e.g. sklearn built for NumPy 1.x running
         # under NumPy 2.x) raise AttributeError/ImportError at import time.
@@ -604,7 +631,8 @@ def print_summary_table(data: dict):
 def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
     """CGM observed vs predicted + residuals + ACF for patients with lowest cost."""
     try:
-        from statsmodels.graphics.tsaplots import plot_acf
+        with _quiet_import():
+            from statsmodels.graphics.tsaplots import plot_acf
     except Exception as e:
         # Broad catch: version-mismatched statsmodels raises TypeError, not
         # ImportError. Manual ACF fallback below covers the missing plotting.
@@ -632,7 +660,10 @@ def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
         gs = fig.add_gridspec(3, 1, height_ratios=[1.2, 1, 0.8], hspace=0.25)
         ax0 = fig.add_subplot(gs[0])
         ax1 = fig.add_subplot(gs[1], sharex=ax0)
-        ax2 = fig.add_subplot(gs[2], sharex=ax0)
+        # NB: no sharex here — the bottom panel is lag-domain (0..n_lags),
+        # not time-domain. Sharing x stretched the time panels into empty
+        # space and mislabeled the axis.
+        ax2 = fig.add_subplot(gs[2])
 
         # --- Top: observed vs predicted ---
         if cgm_pred is not None:
@@ -682,7 +713,7 @@ def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
             ax2.bar(range(len(acf)), acf, width=0.6, color="steelblue", alpha=0.8)
             ax2.axhline(1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5, alpha=0.6)
             ax2.axhline(-1.96 / np.sqrt(n_obs), color="red", linestyle="--", linewidth=0.5, alpha=0.6)
-        ax2.set_xlabel("Time [hours]")
+        ax2.set_xlabel("Lag (CGM steps)")
         ax2.set_ylabel("Autocorrelation")
         ax2.grid(alpha=0.3)
 
@@ -696,7 +727,8 @@ def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
 def plot_residual_acf(data: dict, out_dir: str):
     """Small-multiples ACF plots for all patients."""
     try:
-        from statsmodels.graphics.tsaplots import plot_acf
+        with _quiet_import():
+            from statsmodels.graphics.tsaplots import plot_acf
     except Exception as e:
         # Broad catch: version-mismatched statsmodels raises TypeError, not
         # ImportError. Manual ACF fallback below covers the missing plotting.
@@ -753,7 +785,8 @@ def plot_cmaes_landscape(data: dict, out_dir: str):
         return
 
     try:
-        from sklearn.decomposition import PCA
+        with _quiet_import():
+            from sklearn.decomposition import PCA
     except Exception as e:
         logging.warning(f"  sklearn import failed ({e}), skipping CMA-ES landscape")
         return

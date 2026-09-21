@@ -17,7 +17,7 @@ mkdir -p "$OUT_DIR"
   --seed 42 \
   --restarts 25 \
   --evals 500 \
-  --params-config "$REPO_ROOT/config/complex_irregular_16_active.json" \
+  --params-config "$REPO_ROOT/config/complex_irregular_15_active.json" \
   --duration-min 1440 \
   --n-meals-mean 4 \
   --n-meals-std-day 1 \

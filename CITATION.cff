@@ -3,8 +3,8 @@ title: UVA-Padova Glucose Control System
 message: If you use this software, please cite it as below.
 type: software
 authors:
-  - family-names: Po
-    given-names: Paul
+  - family-names: Belyaev
+    given-names: Pavel
     orcid: https://orcid.org/0009-0000-0000-0000
 license: MIT
 repository-code: https://github.com/1paulpo1/uva-padova-glucose-control-system

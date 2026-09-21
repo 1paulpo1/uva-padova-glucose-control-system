@@ -124,8 +124,16 @@ def filter_results(results, gate_a=None, gate_b=None, patient_range=None):
     return out
 
 
-def plot_true_vs_recovered(data: dict, out_dir: str):
-    """Scatter plot: θ_true vs θ_rec for each parameter."""
+def plot_true_vs_recovered(data: dict, out_dir: str, min_half_span: float = 0.25):
+    """Scatter plot: θ_true vs θ_rec for each parameter.
+
+    Scale fix: axis limits are never tighter than ±``min_half_span`` around
+    the data center (default 0.25 log-units = half of a typical prior std).
+    Without this, a single-patient run auto-scales to a microscopic range and
+    any point looks "on the line" — closeness to y=x is invisible. Each panel
+    title additionally reports the recovery error so scale is explicit even
+    at a glance.
+    """
     params = data["param_names"]
     df = data["df"]
     n_params = len(params)
@@ -141,6 +149,7 @@ def plot_true_vs_recovered(data: dict, out_dir: str):
     theta_rec = df["theta_rec"]
     valid = ~np.isnan(theta_true[:, 0]) & ~np.isnan(theta_rec[:, 0])
 
+    all_err = []
     for i, pname in enumerate(params):
         ax = axes[i]
         tv = theta_true[valid, i]
@@ -148,25 +157,36 @@ def plot_true_vs_recovered(data: dict, out_dir: str):
         n_pts = len(tv)
 
         if n_pts > 0:
+            err = np.abs(rv - tv)
+            all_err.extend(err.tolist())
+            med_err = float(np.median(err))
+            label = f"|err|={err[0]:.3f}" if n_pts == 1 else f"med|err|={med_err:.3f}"
             ax.scatter(tv, rv, alpha=0.6, s=20, edgecolors="k", linewidths=0.3)
             lo = min(tv.min(), rv.min())
             hi = max(tv.max(), rv.max())
-            margin = (hi - lo) * 0.1 if hi > lo else 0.5
-            ax.plot([lo - margin, hi + margin], [lo - margin, hi + margin],
+            center = (lo + hi) / 2.0
+            # Never zoom tighter than ±min_half_span: keeps y=x closeness visible.
+            half = max((hi - lo) / 2.0 * 1.1, min_half_span)
+            ax.plot([center - half, center + half], [center - half, center + half],
                     "r--", linewidth=0.8, alpha=0.5)
-            ax.set_xlim(lo - margin, hi + margin)
-            ax.set_ylim(lo - margin, hi + margin)
+            ax.set_xlim(center - half, center + half)
+            ax.set_ylim(center - half, center + half)
+        else:
+            label = "no data"
 
-        ax.set_title(pname, fontsize=8)
+        ax.set_title(f"{pname}  {label}", fontsize=8)
         ax.set_xlabel("log-parameter value (true)", fontsize=6)
         ax.set_ylabel("log-parameter value (recovered)", fontsize=6)
         ax.tick_params(axis="both", labelsize=5)
         ax.set_aspect("equal", adjustable="box")
+        ax.grid(alpha=0.3)
 
     for i in range(n_params, len(axes)):
         axes[i].set_visible(False)
 
-    fig.suptitle(f"True vs Recovered θ (log-space) — {n_success} successful identifications",
+    mean_err = float(np.mean(all_err)) if all_err else float("nan")
+    fig.suptitle(f"True vs Recovered θ (log-space) — {n_success} successful identifications, "
+                 f"mean |err|={mean_err:.3f} (axes ≥±{min_half_span} log-units)",
                  fontsize=10, y=1.01)
     plt.tight_layout()
     out_path = os.path.join(out_dir, "true_vs_recovered.png")

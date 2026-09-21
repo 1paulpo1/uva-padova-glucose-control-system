@@ -71,8 +71,9 @@ Large sweeps (5–18M JSON per scenario, hours to recompute) are `.gitignore`’
 
 - **300 patients × 3 days, 5 restarts, preset C (irregular meals)** — median `|θ_err|` per param, Gate A pass rate, prior-dominated ranking. Render with `python3 synthetic_study/analyze_results.py --json ~/Documents/uva-padova-archive-local-backup/synthetic_study/crossval_results_1d.json --out /tmp/portfolio_figs`
 - Key finding: 4-active config (`VG, kabs, kp1, kp2`) recovers within 0.15 log-space at 80% Gate A pass; 9-active degrades — matches structural scaling group.
+- **Showcase**: `examples/complex_irregular_patient/` — one hard-but-solvable virtual patient (irregular meals + correction boluses, 16 params, 25 restarts). Run `./examples/complex_irregular_patient/run.sh` (~1–3 h); outputs stay local (git-ignored). Its `true_vs_recovered.png` panels report per-param `|err|` with axes never tighter than ±0.25 log-units, so closeness to `y=x` reads against a fixed scale.
 
-To keep the repo lean, `git add -f` a single small `synthetic_study/100-benchmark-9params/crossval_results.json` (4.5M → downsample or re-run with `--patients 20`) if you want a live demo artifact. Otherwise link to Release assets.
+Run artifacts (JSON/CSV/PNG) are never committed — only scripts, configs, and docs.
 
 ---
 

@@ -34,7 +34,7 @@ static bool validate_jacobian(ObservationCost<Simulator>& obs_cost,
   return true;
 }
 
-static Eigen::MatrixXd prior_covariance(const PriorCost& prior_cost) {
+inline Eigen::MatrixXd prior_covariance(const PriorCost& prior_cost) {
   const int dim = prior_cost.n_params_;
   Eigen::MatrixXd cov = Eigen::MatrixXd::Zero(dim, dim);
   for (int i = 0; i < dim; ++i)

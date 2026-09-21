@@ -12,7 +12,7 @@
 
 ## What is experimental / not validated
 
-- **CKF online layer** `include/uva_padova/cubature_kalman_filter.hpp:60`, `system_model.hpp:25` (SS caching fix #16), `regime_modulated_q.hpp`, `online_observability.hpp` (Gramian fix #27), `rts_smoother.hpp` (Jacobian fix #23), `meal_prior_store.hpp` (context fix #33). Compiles, `synthetic_study/online_evaluate.cpp` runs, but **no real-data closed-loop validation** and no mobile profiling. `FIXME.md` still lists #9 heteroskedasticity weights, #18 mealD fragility, #24-25 Q/P0 scaling (partially fixed), #28 finite-diff scaling.
+- **CKF online layer** `include/uva_padova/cubature_kalman_filter.hpp:60`, `system_model.hpp:25` (SS caching fix #16), `regime_modulated_q.hpp`, `online_observability.hpp` (Gramian fix #27), `rts_smoother.hpp` (Jacobian fix #23), `meal_prior_store.hpp` (context fix #33). Compiles, `synthetic_study/online_evaluate.cpp` runs, but **no real-data closed-loop validation** and no mobile profiling. Open items live in [ROADMAP.md](../ROADMAP.md) (full history: [audit-2026-07.md](audit-2026-07.md)): #9 heteroskedasticity weights, #18 mealD fragility, #22 Cholesky hardening, #26 meal P-jump heuristics, #28 finite-diff scaling.
 - **MPC controller** — spec only (`docs/main.md:1.2`, `docs/STATUS.md`). No code. Listed under Future Work.
 
 ## What is future work

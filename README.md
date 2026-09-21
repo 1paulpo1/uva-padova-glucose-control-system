@@ -15,8 +15,8 @@
 cmake --preset release  # or: cmake -B build -DCMAKE_BUILD_TYPE=Release && cmake --build build -j
 ctest --test-dir build --output-on-failure
 
-# 2) Synthetic recovery — 3 virtual patients, 1 day, ~60s
-./build/synthetic_study/cross_validate --patients 3 --seed 42 --evals 200 --noise-preset cgm --json /tmp/synth.json
+# 2) Synthetic recovery — 1 virtual patient, 1 day, ~2-4 min
+./build/synthetic_study/cross_validate --patients 1 --seed 42 --restarts 3 --evals 200 --noise-preset cgm --csv /tmp/synth.csv --json /tmp/synth.json
 python3 synthetic_study/analyze_results.py --json /tmp/synth.json --out /tmp/figs --no-plots
 cat /tmp/synth.json | python3 -m json.tool | head -n 50
 

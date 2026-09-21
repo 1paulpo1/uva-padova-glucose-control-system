@@ -5,7 +5,6 @@ type: software
 authors:
   - family-names: Belyaev
     given-names: Pavel
-    orcid: https://orcid.org/0009-0000-0000-0000
 license: MIT
 repository-code: https://github.com/1paulpo1/uva-padova-glucose-control-system
 keywords:

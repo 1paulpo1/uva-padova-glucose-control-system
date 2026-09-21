@@ -1,0 +1,13 @@
+# Python dependencies for real_world_validation/ and synthetic_study/ analysis.
+# Core plots need only numpy + matplotlib. The rest are optional and degrade
+# gracefully (PCA/t-SNE need scikit-learn, ACF plots prefer statsmodels).
+# NOTE: this repo's dev env (anaconda, NumPy 2.x) has version-mismatched
+# sklearn/statsmodels builds; analyze_results.py isolates those failures per
+# plot instead of crashing. If you hit import noise, `pip install "numpy<2"`
+# is the pragmatic workaround.
+numpy>=1.24
+matplotlib>=3.7
+pyarrow>=12          # parquet ingest (parsers)
+pandas>=2.0          # parquet ingest (parsers)
+scikit-learn>=1.3    # optional: PCA/t-SNE/landscape plots
+statsmodels>=0.14    # optional: ACF plots (manual fallback exists)

@@ -112,12 +112,7 @@ DBSCANResult cluster_restarts(const std::vector<RestartRecord>& restarts,
       result.labels[i] = -1;
   }
 
-  // Noise label = -1 is not a cluster, so subtract it
-  int noise_count = 0;
-  for (int i = 0; i < N; ++i)
-    if (result.labels[i] == -1)
-      noise_count++;
-
+  // Noise label = -1 is not a cluster; cluster count is just cluster_id.
   result.n_clusters = cluster_id;
   return result;
 }
@@ -240,8 +235,6 @@ GateBResult diagnose_structural_adequacy(
     int count{0};
   };
   Accum reg_acc[2];  // 0=Fasting, 1=Postprandial
-  double regime_glucose_sums[2] = {0.0, 0.0};
-  int regime_counts[2] = {0, 0};
 
   for (int i = 0; i < n; ++i) {
     int ri = (labels[i].type == RegimeType::Postprandial) ? 1 : 0;

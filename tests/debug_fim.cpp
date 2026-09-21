@@ -151,7 +151,7 @@ int main() {
     }
 
     // Write restart data for visualisation
-    std::ofstream csv("uva-padova-cpp/validation/output/gate_restarts.csv");
+    std::ofstream csv("gate_restarts.csv");  // CWD; was a stale absolute path into the pre-rename tree
     csv << "type,cluster";
     for (auto& d : desc) csv << "," << d.name;
     csv << "\n";

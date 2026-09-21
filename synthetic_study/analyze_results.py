@@ -334,8 +334,10 @@ def plot_pca_tsne(data: dict, out_dir: str):
     try:
         from sklearn.decomposition import PCA
         from sklearn.manifold import TSNE
-    except ImportError:
-        logging.warning("  sklearn not available, skipping PCA/t-SNE")
+    except Exception as e:
+        # Broad catch: broken envs (e.g. sklearn built for NumPy 1.x running
+        # under NumPy 2.x) raise AttributeError/ImportError at import time.
+        logging.warning(f"  sklearn import failed ({e}), skipping PCA/t-SNE")
         return
 
     Xc = theta - theta.mean(axis=0)
@@ -433,17 +435,21 @@ def plot_error_correlation_heatmap(data: dict, out_dir: str):
 def plot_pca_with_true(data: dict, out_dir: str):
     """PCA of recovered θ with true θ projected; lines connect each pair."""
     df = data["df"]
-    try:
-        from sklearn.decomposition import PCA
-    except ImportError:
+    valid = ~np.isnan(df["theta_rec"][:, 0]) & ~np.isnan(df["theta_true"][:, 0])
+    if int(valid.sum()) < 3:
         return
 
-    valid = ~np.isnan(df["theta_rec"][:, 0]) & ~np.isnan(df["theta_true"][:, 0])
+    try:
+        from sklearn.decomposition import PCA
+    except Exception as e:
+        # Broad catch: broken envs (e.g. sklearn built for NumPy 1.x running
+        # under NumPy 2.x) raise AttributeError/ImportError at import time.
+        logging.warning(f"  sklearn import failed ({e}), skipping PCA vs true")
+        return
+
     theta_r = df["theta_rec"][valid]
     theta_t = df["theta_true"][valid]
     costs = df["cost"][valid]
-    if len(theta_r) < 3:
-        return
 
     all_theta = np.vstack([theta_r, theta_t])
     all_centered = all_theta - all_theta.mean(axis=0)
@@ -599,7 +605,10 @@ def plot_residual_timeseries(data: dict, out_dir: str, max_patients: int = 3):
     """CGM observed vs predicted + residuals + ACF for patients with lowest cost."""
     try:
         from statsmodels.graphics.tsaplots import plot_acf
-    except ImportError:
+    except Exception as e:
+        # Broad catch: version-mismatched statsmodels raises TypeError, not
+        # ImportError. Manual ACF fallback below covers the missing plotting.
+        logging.warning(f"  statsmodels import failed ({e}), using manual ACF")
         plot_acf = None
 
     results = [r for r in data["results"] if "cgm_residuals" in r]
@@ -688,7 +697,10 @@ def plot_residual_acf(data: dict, out_dir: str):
     """Small-multiples ACF plots for all patients."""
     try:
         from statsmodels.graphics.tsaplots import plot_acf
-    except ImportError:
+    except Exception as e:
+        # Broad catch: version-mismatched statsmodels raises TypeError, not
+        # ImportError. Manual ACF fallback below covers the missing plotting.
+        logging.warning(f"  statsmodels import failed ({e}), using manual ACF")
         plot_acf = None
 
     results = [r for r in data["results"] if "cgm_residuals" in r]
@@ -742,7 +754,8 @@ def plot_cmaes_landscape(data: dict, out_dir: str):
 
     try:
         from sklearn.decomposition import PCA
-    except ImportError:
+    except Exception as e:
+        logging.warning(f"  sklearn import failed ({e}), skipping CMA-ES landscape")
         return
 
     n = len(results)
@@ -1090,7 +1103,11 @@ def main():
 
         logging.info("Generating plots...")
         for name in names:
-            PLOT_REGISTRY[name](data, args.out)
+            try:
+                PLOT_REGISTRY[name](data, args.out)
+            except Exception as e:
+                # One broken plot (e.g. env mismatch) must not kill the rest.
+                logging.warning(f"  Plot '{name}' failed ({e}), skipping")
 
     print_detailed_gate_table(data)
     print_summary_table(data)

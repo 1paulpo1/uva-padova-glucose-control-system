@@ -2,7 +2,9 @@
 # Complex single-patient stress test: irregular meals + correction boluses.
 # Reproduces a run where offline identification recovers all 16 params well.
 #
-# Runtime: ~1-3 hours (25 CMA-ES restarts x 500 evals, 16 active params).
+# Runtime: a few minutes on a laptop (25 CMA-ES restarts x 500 evals,
+# 16 active params; measured ~4 min for a heavier 50x1000 variant on
+# MacBook Pro — scales linearly with restarts x evals plus LM refinement).
 # Outputs go to ./output/ (git-ignored, never committed).
 set -euo pipefail
 
@@ -25,6 +27,7 @@ mkdir -p "$OUT_DIR"
   --split-cv 0.3 \
   --time-cv 0.12 \
   --noise-preset cgm \
+  --csv "$OUT_DIR/synth.csv" \
   --json "$OUT_DIR/synth.json" \
   --verbose
 

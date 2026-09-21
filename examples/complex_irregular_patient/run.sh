@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Complex single-patient stress test: irregular meals + correction boluses.
-# Reproduces a run where offline identification recovers all 16 params well.
+# Single-patient run on the identifiable core (VG, VI, kp1, Gb):
+# irregular meals + correction boluses, 1 day, seed 42.
+# Reference outcome: Gates A/B PASS, 0 prior-dominated, mean |err| ~0.02.
 #
-# Runtime: a few minutes on a laptop (25 CMA-ES restarts x 500 evals,
-# 16 active params; measured ~4 min for a heavier 50x1000 variant on
-# MacBook Pro — scales linearly with restarts x evals plus LM refinement).
+# Runtime ~1 min on a laptop (25 CMA-ES restarts x 500 evals, 4 params;
+# measured 47 s on MacBook Pro).
 # Outputs go to ./output/ (git-ignored, never committed).
+# For bulk statistics on the core see run_stats.sh.
 set -euo pipefail
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

@@ -1,40 +1,54 @@
 # Complex irregular patient (showcase example)
 
-Single virtual patient, 1 day, designed to be **hard but solvable**:
+Single virtual patient, 1 day, with **irregular meals** and **correction
+boluses** (the excitation that makes single-channel identification possible):
 
 - **Irregular meals**: `--n-meals-mean 4 --n-meals-std-day 1` (count varies),
   `--split-cv 0.3 --time-cv 0.12` (size/timing jitter)
 - **Correction boluses**: `--correction-bolus-prob 1` (≈1/hour Poisson),
   mean 1 U ± 0.5 U — insulin without meals, breaks meal/bolus collinearity
-- **15 active params** (`config/complex_irregular_15_active.json`):
-  distribution (`VG/VI`), GI kinetics (`k1/k2/kmax/kmin/kabs/kgri/b`,
-  wider prior 2.0 on `kmax/kmin/kabs/kgri`), EGP (`kp1`),
-  utilization (`p2U`), SC insulin (`ka1/ka2`), sensor (`Ts`, prior 2.0),
-  basal (`Gb`). `d/kp2/ki` are fixed — the preceding 16-param revision
-  showed them unrecoverable from a single day (83/97/57% off,
-  all Gate-C-dominated).
 - **Thorough optimizer**: 25 CMA-ES restarts × 500 evals + LM refinement
+
+Two acts: the identifiable core recovers fully; the extended set documents
+the failure mode. Same patient setup, different param configs.
 
 ## Run
 
 ```bash
-./examples/complex_irregular_patient/run.sh
+./examples/complex_irregular_patient/run.sh          # identifiable core (4 params)
 # outputs: examples/complex_irregular_patient/output/{synth.json,synth.csv,figs/}
+./examples/complex_irregular_patient/run_stats.sh 100 123   # bulk stats on the core
+# outputs: examples/complex_irregular_patient/output/stats_100/{stats.json,stats.csv,figs/}
 ```
 
-Runtime is ~2 min on a laptop for the script's 25×500
-(measured 119 s on MacBook Pro; a heavier 50×1000 variant took 240 s —
-cost scales with restarts × evals plus LM refinement). Results are
-**git-ignored by design** — only the script and this doc are committed.
+Runtime ~1 min for the core script on a laptop
+(measured 47 s on MacBook Pro for 25×500). Results are
+**git-ignored by design** — only scripts and this doc are committed.
 
-## What to expect (honest)
+## Act 1 — the identifiable core (reference outcome)
 
-This is a deliberately hard case — 15 params from a single day of CGM —
-so read it as a pipeline exercise, not a victory lap. Measured reference
-run below used the preceding 16-param config revision (seed 42, 25×500);
-re-run `./run.sh` (~2 min) to refresh the numbers for the current 15-param
-revision, which is expected to do better (three worst offenders fixed,
-wider priors where the data needs room):
+Config `config/default_config_5_active.json`: 4 params
+(`VG, VI, kp1, Gb`), seed 42, 25×500. Measured:
+
+- `success=YES`, LM converges 104.2 → 104.1683 in 6 iters (~12.5k evals).
+- **Gate A PASS** (1 cluster — all restarts agree),
+  **Gate B PASS** (residuals white, no regime bias),
+  **Gate C: 0 prior-dominated**, mean `|θ_err|` ≈ 0.018 log-units
+  (`VG` 1.5%, `VI` 3.9%, `kp1` 1.3%, `Gb` 0.5%).
+- `figs/true_vs_recovered.png`: all four points on the red `y=x`
+  (per-panel `|err|`, fixed ±0.25 scale); `figs/residuals_p0.png`: tight
+  fit, flat ACF.
+
+This is the publishable positive: the full core `{VG, VI, kp1, Gb}` is
+recovered from one day of noisy single-channel CGM. `run_stats.sh`
+scales this to N patients for sufficient statistics.
+
+## Act 2 — the extended set (documented failure mode)
+
+Config `config/complex_irregular_15_active.json`: 15 params
+(distribution `VG/VI`, GI kinetics `k1/k2/kmax/kmin/kabs/kgri/b`,
+EGP `kp1`, utilization `p2U`, SC insulin `ka1/ka2`, sensor `Ts`,
+basal `Gb`). Measured reference (preceding 16-param revision, seed 42):
 
 - `success=YES`, LM converges 432.9 → 103.6 (35 iters, ~11k evals).
 - **Gate A FAIL** (25 restarts scatter, 0 clusters — no consensus),
@@ -44,8 +58,9 @@ wider priors where the data needs room):
 - Split by identifiability: `Gb/kp1/k1/kmin/ka2/b` recover within 5%,
   `k2/kmax/ka1` within ~12%, `kabs/kgri/p2U` miss by ~20%,
   `d/kp2/ki/Ts` miss by 40–97%. The table in the console output and
-  `figs/true_vs_recovered.png` (per-panel `|err|`, fixed ±0.25 scale) show
-  exactly which params the day resolves and which it does not.
+  `figs/true_vs_recovered.png` show exactly which params the day resolves
+  and which it does not — which is how `d/kp2/ki` got fixed in the current
+  15-param revision.
 - `figs/residuals_p0.png`: observed vs predicted CGM plus residuals and ACF
   (lag-domain bottom panel).
 

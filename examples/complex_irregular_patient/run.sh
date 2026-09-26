@@ -5,7 +5,7 @@
 #
 # Runtime ~1 min on a laptop (25 CMA-ES restarts x 500 evals, 4 params;
 # measured 47 s on MacBook Pro).
-# Outputs go to ./output/ (git-ignored, never committed).
+# Outputs go to ./output/ (not tracked by git).
 # For bulk statistics on the core see run_stats.sh.
 set -euo pipefail
 

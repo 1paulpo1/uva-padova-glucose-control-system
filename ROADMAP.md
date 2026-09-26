@@ -1,6 +1,6 @@
 # Roadmap
 
-Current scope and honesty statement: [docs/STATUS.md](docs/STATUS.md).
+Current scope: [docs/STATUS.md](docs/STATUS.md).
 Full historical audit (RU, frozen July 2026): [docs/audit-2026-07.md](docs/audit-2026-07.md).
 Terminology (`validation` vs `crossval` rename): [docs/TERMINOLOGY.md](docs/TERMINOLOGY.md).
 

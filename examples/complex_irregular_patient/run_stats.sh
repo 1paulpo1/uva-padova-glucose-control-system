@@ -4,7 +4,7 @@
 #
 # Usage: ./run_stats.sh [N_PATIENTS] [SEED]   (defaults: 100 123)
 # Runtime: ~1 min per patient on a laptop (see run.sh); scale N to your box.
-# Outputs go to ./output/stats_<N>/ (git-ignored, never committed).
+# Outputs go to ./output/stats_<N>/ (not tracked by git).
 set -euo pipefail
 
 N="${1:-100}"

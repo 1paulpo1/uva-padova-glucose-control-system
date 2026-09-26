@@ -43,6 +43,24 @@ This is the publishable positive: the full core `{VG, VI, kp1, Gb}` is
 recovered from one day of noisy single-channel CGM. `run_stats.sh`
 scales this to N patients for sufficient statistics.
 
+**At scale (300 patients, same setup, `output/300-5p-new.json` — local file,
+not in git):** 300/300 success; gate A 87.3% (262/300), gate B 93.0%
+(279/300); median `|err|` per param `VG` 0.005, `VI` 0.008, `kp1` 0.006,
+`Gb` 0.003 (all <1% in physical units). Gate C averages 0.2 dominated
+params per patient (239/300 clean); `VI` is flagged most often (46×) —
+unsurprising, insulin kinetics from glucose alone is the weakest link of
+the four. Three nuances worth stating plainly:
+(a) the 38 gate-A failures are almost entirely 2-cluster splits, and only
+1 patient fails A and B together — the structure (B) holds wherever
+consensus (A) wobbles;
+(b) on this easy set, gate passage barely separates error: median
+worst-param error is 0.014 for pass vs 0.015 for fail — the gates are
+calibrated for the hard regime and read conservative here;
+(c) the few large misses are isolated per param, not per patient
+(worst `VI` pid 170, worst `Gb` pid 147, worst `kp1` pid 117) — no single
+broken patient, just the tail of the noise. Aggregate plots:
+`output/figs-300/` (same registry, same fixed scales).
+
 ## Act 2 — the extended set (documented failure mode)
 
 Config `config/complex_irregular_15_active.json`: 15 params

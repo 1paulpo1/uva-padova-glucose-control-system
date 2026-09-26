@@ -88,27 +88,44 @@ Rationale in [docs/TERMINOLOGY.md](docs/TERMINOLOGY.md).
 
 ## Results
 
-Two things worth looking at:
+Reference sweep: 300 virtual patients, 1 day each, 5 params
+(`VG, k2, kabs, kp1, kp2`), 5 CMA-ES restarts × 500 evals + LM.
+Raw output is megabytes of JSON and lives outside git; the three figures
+below are the curated exception (`docs/figures/`, regenerable with
+`python3 synthetic_study/analyze_results.py --json <sweep>.json --out docs/figures
+--plot true_vs_recovered,gate_summary,evals_vs_accuracy`).
 
-- **300 patients × 3 days, preset C (irregular meals)** — median recovery
-  error per parameter, gate pass rates, prior-dominated ranking. The sweep
-  outputs are large (megabytes of JSON, hours to recompute), so they live
-  outside git; render them with
-  `python3 synthetic_study/analyze_results.py --json <sweep>.json --out /tmp/portfolio_figs`.
-  Finding: the 4-active config (`VG, kabs, kp1, kp2`) recovers within 0.15
-  log-units at ~80% gate-A pass rate; 9-active degrades — consistent with
-  the structural scaling group in §2.11 of the spec.
-- **Worked example**: `examples/complex_irregular_patient/` — one virtual
-  patient, irregular meals plus correction boluses. The 4-param core
-  (`VG/VI/kp1/Gb`, 25 restarts) passes all gates with mean error ≈ 0.02;
-  the 15-param set fails gate A with 8/16 prior-dominated. Run it with
-  `./examples/complex_irregular_patient/run.sh`, bulk statistics with
-  `run_stats.sh 100 123`. Recovery plots report per-parameter error with
-  axes floored at ±0.25 log-units, so closeness to the diagonal is read
-  against a fixed scale instead of matplotlib autoscale.
+![True vs recovered θ, 300 patients](docs/figures/true_vs_recovered.png)
+
+Recovery follows identifiability, not optimism: `kp1` (median |err| 0.04),
+`VG` (0.07) and `kabs` (0.10) sit on the diagonal; `k2` (0.15) and `kp2`
+(0.18) scatter. Axes are floored at ±0.25 log-units so closeness to the
+diagonal reads against a fixed scale, not matplotlib autoscale.
+
+![Gate pass rates and Gate C histogram](docs/figures/gate_summary.png)
+
+Gate A (restart consensus) passes 299/300; gate B (residual structure)
+268/300. Gate C marks ~2–3 params per patient as prior-dominated — the
+pipeline reports what the data cannot pin down instead of silently fitting
+it.
+
+![Compute cost vs estimation accuracy](docs/figures/evals_vs_accuracy.png)
+
+Each dot is a patient (green: gate A pass; the single red dot is the one
+gate-A failure). Past ~1500 evaluations most land below 0.4 mean |err|, but
+outliers persist at every budget — compute does not rescue the hard cases,
+which is the identifiability story again, from another angle.
+
+Beyond the reference sweep, `examples/complex_irregular_patient/` is a
+worked single-patient case (irregular meals + correction boluses): the
+4-param core (`VG/VI/kp1/Gb`, 25 restarts) passes all gates with mean error
+≈ 0.02, while the 15-param set fails gate A with 8/16 dominated. Run it
+with `./examples/complex_irregular_patient/run.sh`, bulk statistics with
+`run_stats.sh 100 123`.
 
 Where run outputs live: scripts write JSON/CSV/PNG next to themselves or to
-`/tmp`; none of that is committed — only code, configs, and docs are.
+`/tmp`; none of that is committed — only code, configs, docs, and the three
+reference figures above are.
 
 ---
 

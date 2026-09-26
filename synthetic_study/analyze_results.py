@@ -310,9 +310,10 @@ def plot_gate_summary(data: dict, out_dir: str):
     categories = ["Gate A\n(multiplicity)", "Gate B\n(structural adequacy)"]
     pass_rates = [ga_pass / n_total * 100, gb_pass / n_total * 100]
     bars = ax1.bar(categories, pass_rates, color=["#4CAF50", "#2196F3"], alpha=0.8)
-    for bar, rate in zip(bars, pass_rates):
+    # One decimal and exact counts: :.0f once printed "100%" for 299/300.
+    for bar, rate, cnt in zip(bars, pass_rates, (ga_pass, gb_pass)):
         ax1.text(bar.get_x() + bar.get_width() / 2, bar.get_height() + 1,
-                 f"{rate:.0f}% ({int(rate * n_total / 100)}/{n_total})",
+                 f"{rate:.1f}% ({cnt}/{n_total})",
                  ha="center", va="bottom", fontsize=9)
     ax1.set_ylabel("Pass rate (%)")
     ax1.set_ylim(0, 110)
